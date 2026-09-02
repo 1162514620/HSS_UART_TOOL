@@ -1,0 +1,4 @@
+pyserial>=3.5
+matplotlib>=3.7.0
+numpy>=1.25.0
+chardet>=5.0.0
