@@ -1,12 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+import sys
+import os
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=['serial'],
+    datas=[
+        (r'C:\Users\sun\AppData\Local\Programs\Python\Python310\lib\site-packages\ttkbootstrap\assets', 'ttkbootstrap/assets'),
+    ],
+    hiddenimports=[
+        'serial',
+        'ttkbootstrap',
+        'ttkbootstrap.constants',
+        'ttkbootstrap.themes',
+        'ttkbootstrap.themes.standard',
+        'matplotlib',
+        'matplotlib.backends.backend_tkagg',
+        'numpy',
+        'PIL',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -26,8 +26,7 @@ class CommandManager:
     """
 
     def __init__(self):
-        # 沿用旧文件名，保证历史数据平滑迁移
-        self.history_file = os.path.join(_get_app_dir(), "history.json")
+        self.history_file = os.path.join(_get_app_dir(), "cmd.json")
         self.pages: Dict[str, List[dict]] = {}
         self.page_order: List[str] = []
         self.load_commands()
@@ -84,6 +83,17 @@ class CommandManager:
         if page in self.pages and 0 <= index < len(self.pages[page]):
             del self.pages[page][index]
             self.save_commands()
+
+    def insert_command(self, page: str, index: int, item: dict) -> None:
+        """将命令 dict 插入指定页面的指定位置（越界则追加到末尾）"""
+        self._ensure_default_page()
+        if page is None or page not in self.pages:
+            page = self.page_order[0]
+        cmds = self.pages[page]
+        if not (0 <= index <= len(cmds)):
+            index = len(cmds)
+        cmds.insert(index, dict(item))
+        self.save_commands()
 
     def clear_commands(self, page: str = None) -> None:
         """清空指定页面的所有命令"""

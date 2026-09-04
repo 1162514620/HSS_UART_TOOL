@@ -1,0 +1,49 @@
+{
+  "page_order": [
+    "通用AT指令",
+    "中沛188指令",
+    "移远模组AT指令"
+  ],
+  "pages": {
+    "通用AT指令": [
+      {
+        "timestamp": "2026-07-20T22:42:37.942943",
+        "mode": "hex",
+        "content": "55 AA CC 12 11",
+        "label": "",
+        "display": "[HEX] 55 AA CC 12 11"
+      },
+      {
+        "timestamp": "2026-07-20T22:41:23.209388",
+        "mode": "string",
+        "content": "AT+RVER\\r\\n",
+        "label": "",
+        "display": "[STRING] AT+RVER\\r\\n"
+      },
+      {
+        "timestamp": "2026-07-20T22:25:25.701239",
+        "mode": "string",
+        "content": "AT+RVER\r\\r\\n",
+        "label": "",
+        "display": "[STRING] AT+RVER\r\\r\\n"
+      }
+    ],
+    "中沛188指令": [
+      {
+        "timestamp": "2026-06-07T22:17:12.593311",
+        "mode": "hex",
+        "content": "55 AA",
+        "label": "",
+        "display": "[HEX] 55 AA"
+      },
+      {
+        "timestamp": "2026-06-07T22:07:14.729521",
+        "mode": "string",
+        "content": "1212121123123123213213",
+        "label": "",
+        "display": "[STRING] 1212121123123123213213"
+      }
+    ],
+    "移远模组AT指令": []
+  }
+}

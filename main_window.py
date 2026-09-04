@@ -1,4 +1,5 @@
 import tkinter as tk
+import tkinter.font as tkfont
 import ttkbootstrap as ttk
 from tkinter import messagebox, filedialog, simpledialog
 import os
@@ -14,8 +15,9 @@ from datetime import datetime
 from serial_manager import SerialManager
 from receive_thread import ReceiveThread
 from command_manager import CommandManager
+from i18n import t, set_language, get_language
 from styles import (get_color, set_theme, get_current_theme, apply_theme,
-                    get_themes, DARK_THEMES, get_theme_type)
+                    get_themes, THEME_LABELS, is_dark_theme, get_theme_type)
 
 
 def _get_app_dir():
@@ -41,6 +43,13 @@ class MainWindow:
     def __init__(self, root):
         self.root = root
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # 提前读取语言设置，确保首次创建 UI 即为用户选择的语言
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                set_language(json.load(f).get('language', 'zh'))
+        except Exception:
+            pass
 
         # 核心组件
         self.serial_manager = SerialManager()
@@ -119,7 +128,7 @@ class MainWindow:
         # 校验自动添加
         self.checksum_enable_var = tk.BooleanVar(value=False)
         self.checksum_start_var = tk.IntVar(value=0)
-        self.checksum_end_var = tk.StringVar(value='末尾')
+        self.checksum_end_var = tk.StringVar(value=t('末尾'))
         self.checksum_type_var = tk.StringVar(value='ADD8')
 
         # 帧头帧尾
@@ -155,36 +164,37 @@ class MainWindow:
         self.root.config(menu=menubar)
 
         data_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="数据", menu=data_menu)
-        data_menu.add_command(label="导出数据", command=self.export_data)
-        data_menu.add_command(label="数据记录", command=self.show_record_dialog)
+        menubar.add_cascade(label=t("数据"), menu=data_menu)
+        data_menu.add_command(label=t("导出数据"), command=self.export_data)
+        data_menu.add_command(label=t("数据记录"), command=self.show_record_dialog)
 
-        # 主题菜单（使用 ttkbootstrap 内置主题）
+        # 主题菜单（使用 ttkbootstrap 内置主题，显示贴切中文名）
         theme_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="主题", menu=theme_menu)
+        menubar.add_cascade(label=t("主题"), menu=theme_menu)
 
         all_themes = get_themes()
-        light_themes = [t for t in all_themes if t not in DARK_THEMES]
+        dark_themes = sorted([th for th in all_themes if is_dark_theme(th)])
+        light_themes = sorted([th for th in all_themes if not is_dark_theme(th)])
 
-        theme_menu.add_command(label="── 深色主题 ──", state='disabled')
-        for theme_name in sorted(DARK_THEMES):
+        theme_menu.add_command(label=t("── 深色主题 ──"), state='disabled')
+        for theme_name in dark_themes:
             theme_menu.add_command(
-                label=f"    {theme_name}",
-                command=lambda t=theme_name: self.set_theme(t))
+                label=f"    {t(THEME_LABELS.get(theme_name, theme_name))}",
+                command=lambda th=theme_name: self.set_theme(th))
 
         theme_menu.add_separator()
-        theme_menu.add_command(label="── 浅色主题 ──", state='disabled')
-        for theme_name in sorted(light_themes):
+        theme_menu.add_command(label=t("── 浅色主题 ──"), state='disabled')
+        for theme_name in light_themes:
             theme_menu.add_command(
-                label=f"    {theme_name}",
-                command=lambda t=theme_name: self.set_theme(t))
+                label=f"    {t(THEME_LABELS.get(theme_name, theme_name))}",
+                command=lambda th=theme_name: self.set_theme(th))
 
         # 编码菜单
         encoding_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="编码", menu=encoding_menu)
+        menubar.add_cascade(label=t("编码"), menu=encoding_menu)
 
         recv_enc_menu = tk.Menu(encoding_menu, tearoff=0)
-        encoding_menu.add_cascade(label="接收编码", menu=recv_enc_menu)
+        encoding_menu.add_cascade(label=t("接收编码"), menu=recv_enc_menu)
         for enc in ENCODINGS:
             recv_enc_menu.add_radiobutton(
                 label=enc, variable=self.encoding_var, value=enc,
@@ -193,7 +203,7 @@ class MainWindow:
         encoding_menu.add_separator()
 
         send_enc_menu = tk.Menu(encoding_menu, tearoff=0)
-        encoding_menu.add_cascade(label="发送编码", menu=send_enc_menu)
+        encoding_menu.add_cascade(label=t("发送编码"), menu=send_enc_menu)
         for enc in ENCODINGS:
             send_enc_menu.add_radiobutton(
                 label=enc, variable=self.send_encoding_var, value=enc,
@@ -201,46 +211,50 @@ class MainWindow:
 
         # 设置菜单
         settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="设置", menu=settings_menu)
+        menubar.add_cascade(label=t("设置"), menu=settings_menu)
         settings_menu.add_command(
-            label="自动重连设置", command=self.show_reconnect_settings_dialog)
+            label=t("自动重连设置"), command=self.show_reconnect_settings_dialog)
         settings_menu.add_separator()
-        settings_menu.add_checkbutton(label="地址偏移", variable=self.hex_addr_var,
+        settings_menu.add_checkbutton(label=t("地址偏移"), variable=self.hex_addr_var,
                                       command=self.save_settings)
         settings_menu.add_command(
-            label="HEX换行字节数...", command=self._show_hex_newline_dialog)
+            label=t("HEX换行字节数..."), command=self._show_hex_newline_dialog)
 
         # 扩展菜单
         extend_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="扩展", menu=extend_menu)
-        extend_menu.add_command(label="波形显示", command=self.toggle_waveform)
+        menubar.add_cascade(label=t("扩展"), menu=extend_menu)
+        extend_menu.add_command(label=t("波形显示"), command=self.toggle_waveform)
 
-        # 帮助菜单
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="帮助", menu=help_menu)
-        help_menu.add_command(label="使用说明", command=self.show_help)
+        # 语言菜单（切换中英文，重建 UI）
+        lang_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label=t("语言"), menu=lang_menu)
+        self.language_var = tk.StringVar(value=get_language())
+        for code, label in (('zh', '中文'), ('en', 'English')):
+            lang_menu.add_radiobutton(
+                label=label, variable=self.language_var,
+                value=code, command=self._switch_language)
 
     # ==================== 串口控制栏 ====================
 
     def create_serial_control_bar(self):
         """在接收区上方添加串口控制栏"""
-        self.ctrl_frame = ttk.LabelFrame(self.root, text="串口控制")
+        self.ctrl_frame = ttk.LabelFrame(self.root, text=t("串口控制"))
         self.ctrl_frame.pack(fill=tk.X, padx=6, pady=(6, 2))
 
         row1 = ttk.Frame(self.ctrl_frame)
         row1.pack(fill=tk.X, padx=4, pady=(4, 2))
 
-        ttk.Label(row1, text="串口:").pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Label(row1, text=t("串口:")).pack(side=tk.LEFT, padx=(0, 2))
         self.port_combo = ttk.Combobox(row1, textvariable=self.port_var,
                                        state='readonly', width=20)
         self.port_combo.pack(side=tk.LEFT, padx=2)
-        ttk.Button(row1, text="刷新", command=self.refresh_ports_ui,
+        ttk.Button(row1, text=t("刷新"), command=self.refresh_ports_ui,
                    width=5).pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(row1, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
 
-        ttk.Label(row1, text="波特率:").pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Label(row1, text=t("波特率:")).pack(side=tk.LEFT, padx=(0, 2))
         self.baudrate_combo = ttk.Combobox(row1, textvariable=self.baudrate_var,
                                            values=BAUDRATES, width=8)
         self.baudrate_combo.pack(side=tk.LEFT, padx=2)
@@ -248,7 +262,7 @@ class MainWindow:
         ttk.Separator(row1, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
 
-        ttk.Label(row1, text="校验:").pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Label(row1, text=t("校验:")).pack(side=tk.LEFT, padx=(0, 2))
         self.parity_combo = ttk.Combobox(row1, textvariable=self.parity_var,
                                          values=['None', 'Even',
                                                  'Odd', 'Mark', 'Space'],
@@ -258,11 +272,11 @@ class MainWindow:
         ttk.Separator(row1, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
 
-        self.connect_btn = ttk.Button(row1, text="连接",
+        self.connect_btn = ttk.Button(row1, text=t("连接"),
                                       command=self.toggle_connection)
         self.connect_btn.pack(side=tk.LEFT, padx=4)
 
-        ttk.Button(row1, text="更多设置", command=self.show_serial_settings_dialog).pack(
+        ttk.Button(row1, text=t("更多设置"), command=self.show_serial_settings_dialog).pack(
             side=tk.LEFT, padx=2)
 
     def refresh_ports_ui(self):
@@ -277,25 +291,26 @@ class MainWindow:
     # ==================== 主内容区 ====================
 
     def create_main_content(self):
-        """创建主内容区：左侧(接收+发送) + 右侧(多命令发送)"""
-        content = ttk.Frame(self.root)
-        content.pack(fill=tk.BOTH, expand=True, padx=6, pady=2)
+        """创建主内容区：PanedWindow 左右分割，拖动 sash 改变右侧面板宽度"""
+        self.content_pw = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
+        self.content_pw.pack(fill=tk.BOTH, expand=True, padx=6, pady=2)
 
-        # 左侧：接收区 + 发送区（纵向排列，横向自动伸缩）
-        self.left_frame = ttk.Frame(content)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # 左侧：接收区 + 发送区
+        self.left_frame = ttk.Frame(self.content_pw)
+        # weight=1：窗口大小变化时多余空间分配给左侧，右侧面板宽度保持用户设置值
+        self.content_pw.add(self.left_frame, weight=1)
 
         self.create_receive_area(self.left_frame)
         self.create_send_area(self.left_frame)
 
-        # 右侧：多命令发送（固定宽度，纵向自动伸缩）
-        self.create_command_panel(content)
+        # 右侧：多命令发送 / 自动应答
+        self.create_command_panel(self.content_pw)
 
     # ==================== 接收区 ====================
 
     def create_receive_area(self, parent):
         """创建接收区，操作按键在文本框下方"""
-        self.recv_frame = ttk.LabelFrame(parent, text="接收区")
+        self.recv_frame = ttk.LabelFrame(parent, text=t("接收区"))
         self.recv_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 2))
 
         # Notebook (字符串/HEX 选项卡) - 占据主要空间
@@ -304,7 +319,7 @@ class MainWindow:
 
         # 字符串选项卡
         string_tab = ttk.Frame(self.recv_notebook)
-        self.recv_notebook.add(string_tab, text="字符串")
+        self.recv_notebook.add(string_tab, text=t("字符串"))
         self.string_recv_text = self._create_scrolled_text(string_tab)
 
         # HEX 选项卡
@@ -312,44 +327,52 @@ class MainWindow:
         self.recv_notebook.add(hex_tab, text="HEX")
         self.hex_recv_text = self._create_scrolled_text(hex_tab)
 
+        # 对照选项卡（HEX 与字符串一上一下同时显示）
+        compare_tab = ttk.Frame(self.recv_notebook)
+        self.recv_notebook.add(compare_tab, text=t("对照"))
+        self.compare_recv_text = self._create_scrolled_text(compare_tab)
+
         # 配置文本标签颜色
         self._configure_text_tags(self.string_recv_text)
         self._configure_text_tags(self.hex_recv_text)
+        self._configure_text_tags(self.compare_recv_text)
 
         # 操作工具栏 - 在文本框下方
         toolbar = ttk.Frame(self.recv_frame)
         toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
 
-        ttk.Button(toolbar, text="清空接收区", command=self.clear_receive_area).pack(
+        ttk.Button(toolbar, text=t("清空接收区"), command=self.clear_receive_area).pack(
             side=tk.LEFT, padx=2)
         self.pause_btn = ttk.Button(
-            toolbar, text="暂停显示", command=self.toggle_pause)
+            toolbar, text=t("暂停显示"), command=self.toggle_pause)
         self.pause_btn.pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
-        ttk.Checkbutton(toolbar, text="时间戳", variable=self.timestamp_var).pack(
+        ttk.Checkbutton(toolbar, text=t("时间戳"), variable=self.timestamp_var).pack(
             side=tk.LEFT, padx=2)
-        ttk.Checkbutton(toolbar, text="方向", variable=self.direction_var).pack(
+        ttk.Checkbutton(toolbar, text=t("方向"), variable=self.direction_var).pack(
             side=tk.LEFT, padx=2)
-        ttk.Checkbutton(toolbar, text="回显", variable=self.echo_var).pack(
+        ttk.Checkbutton(toolbar, text=t("回显"), variable=self.echo_var).pack(
             side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
-        ttk.Label(toolbar, text="超时:").pack(side=tk.LEFT)
-        self.recv_timeout_var = tk.IntVar(value=0)
-        self.recv_timeout_var.trace_add('write', self._on_recv_timeout_changed)
-        ttk.Spinbox(toolbar, from_=0, to=10000000,
+        ttk.Label(toolbar, text=t("超时:")).pack(side=tk.LEFT)
+        # 语言切换重建 UI 时保留原超时值与 trace（变量随 root 存活）
+        if not hasattr(self, 'recv_timeout_var'):
+            self.recv_timeout_var = tk.IntVar(value=0)
+            self.recv_timeout_var.trace_add('write', self._on_recv_timeout_changed)
+        ttk.Spinbox(toolbar, from_=0, to=10000,
                     textvariable=self.recv_timeout_var, width=8).pack(
-            side=tk.LEFT, padx=2)
-        ttk.Label(toolbar, text="us(0=自动)").pack(side=tk.LEFT)
+                        side=tk.LEFT, padx=2)
+        ttk.Label(toolbar, text=t("ms(0=自动)")).pack(side=tk.LEFT)
 
     # ==================== 发送区 ====================
 
     def create_send_area(self, parent):
         """创建发送区（不含历史记录，历史在右侧）"""
-        self.send_frame = ttk.LabelFrame(parent, text="发送区")
+        self.send_frame = ttk.LabelFrame(parent, text=t("发送区"))
         self.send_frame.pack(fill=tk.X, padx=0, pady=(2, 0))
 
         # Notebook (字符串/HEX 输入)
@@ -358,7 +381,7 @@ class MainWindow:
 
         # 字符串输入
         str_tab = ttk.Frame(self.send_notebook)
-        self.send_notebook.add(str_tab, text="字符串")
+        self.send_notebook.add(str_tab, text=t("字符串"))
         self.string_input = tk.Text(str_tab, height=4, wrap=tk.WORD, undo=True,
                                     font=('Consolas', 10))
         self.string_input.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
@@ -378,46 +401,49 @@ class MainWindow:
         toolbar = ttk.Frame(self.send_frame)
         toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
 
-        self.send_btn = ttk.Button(toolbar, text=" 发送 ",
+        self.send_btn = ttk.Button(toolbar, text=t(" 发送 "),
                                    command=self.send_data)
         self.send_btn.pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
-        self.auto_escape_cb = ttk.Checkbutton(toolbar, text="自动转义", variable=self.auto_escape_var)
+        self.auto_escape_cb = ttk.Checkbutton(toolbar, text=t("自动转义"), variable=self.auto_escape_var)
         self.auto_escape_cb.pack(side=tk.LEFT, padx=2)
-        self.crlf_cb = ttk.Checkbutton(toolbar, text="回车换行", variable=self.crlf_var)
+        self.crlf_cb = ttk.Checkbutton(toolbar, text=t("回车换行"), variable=self.crlf_var)
         self.crlf_cb.pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
-        ttk.Checkbutton(toolbar, text="循环发送", variable=self.loop_var,
+        ttk.Checkbutton(toolbar, text=t("循环发送"), variable=self.loop_var,
                         command=self._on_loop_toggle).pack(side=tk.LEFT, padx=2)
-        ttk.Label(toolbar, text="间隔:").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(toolbar, text=t("间隔:")).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Spinbox(toolbar, from_=1, to=60000, textvariable=self.loop_interval_var,
                     width=6).pack(side=tk.LEFT, padx=2)
         ttk.Label(toolbar, text="ms").pack(side=tk.LEFT)
-        ttk.Label(toolbar, text="次数:").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(toolbar, text=t("次数:")).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Spinbox(toolbar, from_=0, to=999999, textvariable=self.loop_count_var,
                     width=6).pack(side=tk.LEFT, padx=2)
-        ttk.Label(toolbar, text="(0=无限)").pack(side=tk.LEFT)
+        ttk.Label(toolbar, text=t("(0=无限)")).pack(side=tk.LEFT)
 
         # 校验自动添加行
         checksum_row = ttk.Frame(self.send_frame)
         checksum_row.pack(fill=tk.X, padx=4, pady=(0, 4))
 
-        self.checksum_checkbtn = ttk.Checkbutton(checksum_row, text="校验", variable=self.checksum_enable_var)
+        self.checksum_checkbtn = ttk.Checkbutton(checksum_row, text=t("校验"), variable=self.checksum_enable_var)
         self.checksum_checkbtn.pack(side=tk.LEFT, padx=2)
-        ttk.Label(checksum_row, text="第").pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Label(checksum_row, text=t("第")).pack(side=tk.LEFT, padx=(4, 0))
         self.checksum_start_spin = ttk.Spinbox(checksum_row, from_=0, to=9999,
                     textvariable=self.checksum_start_var, width=4)
         self.checksum_start_spin.pack(side=tk.LEFT, padx=2)
-        ttk.Label(checksum_row, text="字节到第").pack(side=tk.LEFT)
+        ttk.Label(checksum_row, text=t("字节到第")).pack(side=tk.LEFT)
+        # 组合框值为翻译文本；语言切换时把旧语言的"末尾"迁移到新语言
+        if self.checksum_end_var.get() in ('末尾', 'End'):
+            self.checksum_end_var.set(t('末尾'))
         self.checksum_end_combo = ttk.Combobox(checksum_row, textvariable=self.checksum_end_var,
-                     values=['末尾', '-1', '-2', '-3', '-4'], width=4,
+                     values=[t('末尾'), '-1', '-2', '-3', '-4'], width=4,
                      state='readonly')
         self.checksum_end_combo.pack(side=tk.LEFT, padx=2)
-        ttk.Label(checksum_row, text="字节").pack(side=tk.LEFT)
+        ttk.Label(checksum_row, text=t("字节")).pack(side=tk.LEFT)
         self.checksum_type_combo = ttk.Combobox(checksum_row, textvariable=self.checksum_type_var,
                      values=['ADD8', 'ADD16', 'XOR8', 'ModBusCRC16'],
                      width=12, state='readonly')
@@ -427,13 +453,13 @@ class MainWindow:
         frame_row = ttk.Frame(self.send_frame)
         frame_row.pack(fill=tk.X, padx=4, pady=(0, 4))
 
-        ttk.Checkbutton(frame_row, text="添加帧头帧尾", variable=self.frame_enable_var).pack(
+        ttk.Checkbutton(frame_row, text=t("添加帧头帧尾"), variable=self.frame_enable_var).pack(
             side=tk.LEFT, padx=2)
-        ttk.Label(frame_row, text="帧头:").pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Label(frame_row, text=t("帧头:")).pack(side=tk.LEFT, padx=(4, 0))
         self.frame_header_entry = ttk.Entry(frame_row, textvariable=self.frame_header_content_var,
                                             width=10, font=('Consolas', 9))
         self.frame_header_entry.pack(side=tk.LEFT, padx=2)
-        ttk.Label(frame_row, text="帧尾:").pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Label(frame_row, text=t("帧尾:")).pack(side=tk.LEFT, padx=(4, 0))
         self.frame_footer_entry = ttk.Entry(frame_row, textvariable=self.frame_footer_content_var,
                                             width=10, font=('Consolas', 9))
         self.frame_footer_entry.pack(side=tk.LEFT, padx=2)
@@ -443,13 +469,24 @@ class MainWindow:
     # ==================== 多命令发送面板 ====================
 
     def create_command_panel(self, parent):
-        """创建右侧面板（多命令发送 / 自动应答 切换）"""
-        self.hist_panel_width = 220
-        self.hist_frame = ttk.LabelFrame(parent, text="功能面板")
-        self.hist_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        """创建右侧面板（多命令发送 / 自动应答 切换）
 
+        parent: Panedwindow，通过 add() 加入为窗格，支持原生 sash 拖动
+        """
+        # 语言切换重建 UI 时保留用户设置的宽度
+        if not hasattr(self, 'hist_panel_width'):
+            self.hist_panel_width = 220
+        self.hist_frame = ttk.LabelFrame(parent, text=t("功能面板"))
+        parent.add(self.hist_frame)
         self.hist_frame.configure(width=self.hist_panel_width)
-        self.hist_frame.pack_propagate(False)
+        # 拖动 sash 改变宽度后同步宽度变量/设置
+        # （sash 属于 Panedwindow 本体，绑定其上精确捕获拖动；
+        #   不用 hist_frame 的 <Configure>，避免窗口缩放引起的宽度变化误存为设置值）
+        try:
+            parent.bind('<B1-Motion>', self._sync_hist_width_from_sash)
+            parent.bind('<ButtonRelease-1>', self._sync_hist_width_from_sash)
+        except Exception:
+            pass
 
         # 顶层 Tab：多命令发送 / 自动应答
         self.func_notebook = ttk.Notebook(self.hist_frame)
@@ -457,36 +494,52 @@ class MainWindow:
 
         # === 多命令发送 Tab ===
         cmd_tab = ttk.Frame(self.func_notebook)
-        self.func_notebook.add(cmd_tab, text="多命令发送")
+        self.func_notebook.add(cmd_tab, text=t("多命令发送"))
 
-        # 页面 Notebook（在多命令发送 Tab 内部）
-        self.hist_notebook = ttk.Notebook(cmd_tab)
-        self.hist_notebook.pack(fill=tk.BOTH, expand=True)
-        self.hist_notebook.bind('<Button-3>', self._on_tab_right_click)
-
-        self.hist_listboxes: dict = {}
-        for page_name in self.command_manager.get_pages():
-            self._add_command_tab(page_name)
-
-        # 底部按钮：两行布局
-        cmd_bottom = ttk.Frame(cmd_tab)
-        cmd_bottom.pack(fill=tk.X, padx=2, pady=(0, 2))
-
-        btn_row1 = ttk.Frame(cmd_bottom)
-        btn_row1.pack(fill=tk.X, pady=(0, 2))
-        ttk.Button(btn_row1, text="新增页面",
+        # 页面操作按钮行（新增页面 / 删除页面）——位于页面选择行上方
+        page_ops = ttk.Frame(cmd_tab)
+        page_ops.pack(fill=tk.X, padx=2, pady=(2, 2))
+        ttk.Button(page_ops, text=t("新增页面"),
                    command=self._add_new_command_page).pack(
                        side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        ttk.Button(btn_row1, text="删除页面",
+        ttk.Button(page_ops, text=t("删除页面"),
                    command=self._delete_current_command_page).pack(
                        side=tk.LEFT, fill=tk.X, expand=True)
 
-        btn_row2 = ttk.Frame(cmd_bottom)
-        btn_row2.pack(fill=tk.X)
-        ttk.Button(btn_row2, text="添加命令",
+        # 页面选择器（Combobox + 重命名按钮）——解决多页面 Tab 头拥挤问题
+        page_top = ttk.Frame(cmd_tab)
+        page_top.pack(fill=tk.X, padx=2, pady=(0, 2))
+        ttk.Label(page_top, text=t("页面:")).pack(side=tk.LEFT)
+        self.page_selector = ttk.Combobox(
+            page_top, state='readonly', values=self.command_manager.get_pages())
+        self.page_selector.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 2))
+        self.page_selector.bind(
+            '<<ComboboxSelected>>', self._on_page_selector_changed)
+        ttk.Button(page_top, text=t("重命名"), width=6,
+                   command=self._rename_current_page).pack(side=tk.LEFT)
+
+        # 中部：命令内容容器（Frame 叠放，切页时 pack 对应容器）
+        self.page_content = ttk.Frame(cmd_tab)
+        self.page_content.pack(fill=tk.BOTH, expand=True, padx=2)
+
+        self.hist_listboxes: dict = {}   # page_name -> Treeview
+        self._page_frames: dict = {}     # page_name -> content Frame（含 Treeview）
+        self._current_page_idx = 0
+        self._cmd_clipboard = None       # 命令剪切板（Ctrl+X/Ctrl+V 重排用）
+
+        for page_name in self.command_manager.get_pages():
+            self._add_command_tab(page_name)
+        if self.command_manager.get_pages():
+            self._switch_to_page(0)
+
+        # 底部按钮：仅保留命令操作
+        cmd_bottom = ttk.Frame(cmd_tab)
+        cmd_bottom.pack(fill=tk.X, padx=2, pady=(0, 2))
+
+        ttk.Button(cmd_bottom, text=t("添加命令"),
                    command=self._add_command_to_current_page).pack(
                        side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        ttk.Button(btn_row2, text="清空当前",
+        ttk.Button(cmd_bottom, text=t("清空当前"),
                    command=self.clear_commands).pack(
                        side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -498,22 +551,22 @@ class MainWindow:
         bottom.pack(fill=tk.X, padx=4, pady=(0, 4))
         width_row = ttk.Frame(bottom)
         width_row.pack(fill=tk.X)
-        ttk.Label(width_row, text="宽度:").pack(side=tk.LEFT)
+        ttk.Label(width_row, text=t("宽度:")).pack(side=tk.LEFT)
         self.hist_width_var = tk.IntVar(value=self.hist_panel_width)
         ttk.Spinbox(width_row, from_=100, to=500, textvariable=self.hist_width_var,
                     width=5, command=self._apply_hist_width).pack(side=tk.LEFT, padx=2)
-        ttk.Button(width_row, text="设置", width=4,
+        ttk.Button(width_row, text=t("应用"), width=4,
                    command=self._apply_hist_width).pack(side=tk.LEFT)
 
     def _create_auto_reply_tab(self):
         """创建自动应答 Tab"""
         reply_tab = ttk.Frame(self.func_notebook)
-        self.func_notebook.add(reply_tab, text="自动应答")
+        self.func_notebook.add(reply_tab, text=t("自动应答"))
 
         # 开启/关闭按钮
         top_row = ttk.Frame(reply_tab)
         top_row.pack(fill=tk.X, padx=2, pady=2)
-        self.auto_reply_btn = ttk.Button(top_row, text="开启自动应答",
+        self.auto_reply_btn = ttk.Button(top_row, text=t("开启自动应答"),
                                          command=self._toggle_auto_reply)
         self.auto_reply_btn.pack(fill=tk.X)
 
@@ -526,10 +579,10 @@ class MainWindow:
             list_frame, yscrollcommand=scroll.set,
             selectmode='browse', show='headings',
             columns=('status', 'mode', 'trigger', 'reply'))
-        self.reply_rules_list.heading('status', text='状态')
-        self.reply_rules_list.heading('mode', text='模式')
-        self.reply_rules_list.heading('trigger', text='触发')
-        self.reply_rules_list.heading('reply', text='响应')
+        self.reply_rules_list.heading('status', text=t('状态'))
+        self.reply_rules_list.heading('mode', text=t('模式'))
+        self.reply_rules_list.heading('trigger', text=t('触发'))
+        self.reply_rules_list.heading('reply', text=t('响应'))
         self.reply_rules_list.column('status', width=44, anchor='center', stretch=False)
         self.reply_rules_list.column('mode', width=50, anchor='center', stretch=False)
         self.reply_rules_list.column('trigger', anchor='w', stretch=True)
@@ -543,17 +596,17 @@ class MainWindow:
         # 添加/删除按钮
         btn_row = ttk.Frame(reply_tab)
         btn_row.pack(fill=tk.X, padx=2, pady=2)
-        ttk.Button(btn_row, text="添加规则",
+        ttk.Button(btn_row, text=t("添加规则"),
                    command=self._add_reply_rule).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        ttk.Button(btn_row, text="删除规则",
+        ttk.Button(btn_row, text=t("删除规则"),
                    command=self._delete_reply_rule).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     def _toggle_auto_reply(self):
         self.auto_reply_enabled = not self.auto_reply_enabled
         if self.auto_reply_enabled:
-            self.auto_reply_btn.configure(text="关闭自动应答")
+            self.auto_reply_btn.configure(text=t("关闭自动应答"))
         else:
-            self.auto_reply_btn.configure(text="开启自动应答")
+            self.auto_reply_btn.configure(text=t("开启自动应答"))
 
     def _add_reply_rule(self):
         """添加自动应答规则"""
@@ -585,14 +638,14 @@ class MainWindow:
             self.reply_rules_list.selection())
         self.reply_rules_list.selection_set(iid)
         menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label="编辑规则", command=lambda: self._edit_reply_rule())
-        menu.add_command(label="删除规则", command=self._delete_reply_rule)
+        menu.add_command(label=t("编辑规则"), command=lambda: self._edit_reply_rule())
+        menu.add_command(label=t("删除规则"), command=self._delete_reply_rule)
         menu.tk_popup(event.x_root, event.y_root)
 
     def _create_reply_rule_dialog(self, rule=None, edit_idx=None):
         """创建/编辑自动应答规则对话框"""
         dialog = tk.Toplevel(self.root)
-        dialog.title("编辑规则" if rule else "添加规则")
+        dialog.title(t("编辑规则") if rule else t("添加规则"))
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -602,7 +655,7 @@ class MainWindow:
 
         # 匹配模式
         row = 0
-        ttk.Label(frame, text="匹配模式:").grid(
+        ttk.Label(frame, text=t("匹配模式:")).grid(
             row=row, column=0, sticky='w', pady=2)
         match_mode = tk.StringVar(
             value=rule['match_mode'] if rule else 'string')
@@ -612,7 +665,7 @@ class MainWindow:
 
         # 匹配内容
         row += 1
-        ttk.Label(frame, text="匹配内容:").grid(
+        ttk.Label(frame, text=t("匹配内容:")).grid(
             row=row, column=0, sticky='w', pady=2)
         match_content = tk.StringVar(
             value=rule['match_content'] if rule else '')
@@ -623,12 +676,12 @@ class MainWindow:
         row += 1
         use_regex = tk.BooleanVar(value=rule.get(
             'use_regex', False) if rule else False)
-        ttk.Checkbutton(frame, text="使用正则表达式", variable=use_regex).grid(
+        ttk.Checkbutton(frame, text=t("使用正则表达式"), variable=use_regex).grid(
             row=row, column=0, columnspan=2, sticky='w', pady=2)
 
         # 应答模式
         row += 1
-        ttk.Label(frame, text="应答模式:").grid(
+        ttk.Label(frame, text=t("应答模式:")).grid(
             row=row, column=0, sticky='w', pady=2)
         reply_mode = tk.StringVar(
             value=rule['reply_mode'] if rule else 'string')
@@ -638,7 +691,7 @@ class MainWindow:
 
         # 应答内容
         row += 1
-        ttk.Label(frame, text="应答内容:").grid(
+        ttk.Label(frame, text=t("应答内容:")).grid(
             row=row, column=0, sticky='w', pady=2)
         reply_content = tk.StringVar(
             value=rule['reply_content'] if rule else '')
@@ -647,7 +700,7 @@ class MainWindow:
 
         # 延时
         row += 1
-        ttk.Label(frame, text="延时(ms):").grid(
+        ttk.Label(frame, text=t("延时(ms):")).grid(
             row=row, column=0, sticky='w', pady=2)
         delay = tk.IntVar(value=rule.get('delay', 100) if rule else 100)
         ttk.Spinbox(frame, from_=0, to=60000, textvariable=delay, width=8).grid(
@@ -657,7 +710,7 @@ class MainWindow:
         row += 1
         enabled = tk.BooleanVar(value=rule.get(
             'enabled', True) if rule else True)
-        ttk.Checkbutton(frame, text="启用此规则", variable=enabled).grid(
+        ttk.Checkbutton(frame, text=t("启用此规则"), variable=enabled).grid(
             row=row, column=0, columnspan=2, sticky='w', pady=2)
 
         # 按钮
@@ -669,7 +722,7 @@ class MainWindow:
             mc = match_content.get().strip()
             rc = reply_content.get().strip()
             if not mc or not rc:
-                messagebox.showwarning("提示", "匹配内容和应答内容不能为空", parent=dialog)
+                messagebox.showwarning(t("提示"), t("匹配内容和应答内容不能为空"), parent=dialog)
                 return
             new_rule = {
                 'match_mode': match_mode.get(),
@@ -687,9 +740,9 @@ class MainWindow:
             self._refresh_reply_rules_list()
             dialog.destroy()
 
-        ttk.Button(btn_frame, text="确定", command=on_ok).pack(
+        ttk.Button(btn_frame, text=t("确定"), command=on_ok).pack(
             side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(
+        ttk.Button(btn_frame, text=t("取消"), command=dialog.destroy).pack(
             side=tk.LEFT, padx=5)
 
         self._center_dialog(dialog)
@@ -710,15 +763,10 @@ class MainWindow:
                         values=(status, mode, trigger, reply))
 
     def _add_command_tab(self, page_name: str):
-        """创建一个命令页面标签"""
-        tab = ttk.Frame(self.hist_notebook)
-        self.hist_notebook.add(tab, text=page_name)
-
-        container = ttk.Frame(tab)
-        container.pack(fill=tk.BOTH, expand=True)
+        """创建一个命令页面（Frame + Treeview + scrollbar，存入 dict）"""
+        container = ttk.Frame(self.page_content)
 
         scroll = ttk.Scrollbar(container, orient=tk.VERTICAL)
-        # 用 ttk.Treeview 替代 Listbox，外观随主题统一
         # show='tree' 只显示 #0 列、无表头；iid=str(index) 便于按索引定位
         tree = ttk.Treeview(container, yscrollcommand=scroll.set,
                             selectmode='browse', show='tree')
@@ -734,29 +782,54 @@ class MainWindow:
         tree.bind('<Double-Button-1>', self.on_command_double_click)
         tree.bind('<Button-1>', self.on_command_single_click)
         tree.bind('<Button-3>', self.show_command_context_menu)
+        # Ctrl+X 剪切 / Ctrl+V 粘贴（重排命令，同时绑定大小写两种键序）
+        for key, cb in (('<Control-x>', self._on_command_cut),
+                        ('<Control-X>', self._on_command_cut),
+                        ('<Control-v>', self._on_command_paste),
+                        ('<Control-V>', self._on_command_paste)):
+            tree.bind(key, cb)
+        tree._page_name = page_name  # 事件回调中反查
 
+        self._page_frames[page_name] = container
         self.hist_listboxes[page_name] = tree
+
+    def _switch_to_page(self, idx: int):
+        """按索引切页：Combobox 同步 + 叠放对应 Frame"""
+        pages = self.command_manager.get_pages()
+        if idx < 0 or idx >= len(pages):
+            return
+        name = pages[idx]
+        self._current_page_idx = idx
+        self.page_selector.configure(values=pages)
+        self.page_selector.current(idx)
+        # 叠放切换：隐藏所有，显示目标
+        for frame in self._page_frames.values():
+            frame.pack_forget()
+        frame = self._page_frames.get(name)
+        if frame is not None:
+            frame.pack(fill=tk.BOTH, expand=True)
+
+    def _on_page_selector_changed(self, _event=None):
+        """用户在 Combobox 选页时触发切页"""
+        idx = self.page_selector.current()
+        self._switch_to_page(idx)
 
     def _get_current_page_name(self) -> str:
         """获取当前选中的页面名"""
-        idx = self.hist_notebook.index('current')
-        return self.command_manager.get_pages()[idx]
+        pages = self.command_manager.get_pages()
+        if 0 <= self._current_page_idx < len(pages):
+            return pages[self._current_page_idx]
+        return pages[0] if pages else ''
 
-    def _on_tab_right_click(self, event):
-        """右键点击标签页时弹出重命名菜单"""
-        # 获取点击位置对应的标签索引
-        tab_idx = self.hist_notebook.index(f"@{event.x},{event.y}")
-        if tab_idx < 0:
+    def _rename_current_page(self):
+        old_name = self._get_current_page_name()
+        if not old_name:
             return
-        page_name = self.command_manager.get_pages()[tab_idx]
-        menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label="重命名页面",
-                         command=lambda: self._rename_command_page(page_name))
-        menu.tk_popup(event.x_root, event.y_root)
+        self._rename_command_page(old_name)
 
     def _rename_command_page(self, old_name: str):
         new_name = simpledialog.askstring(
-            "重命名页面", "请输入新的页面名称：",
+            t("重命名页面"), t("请输入新的页面名称："),
             initialvalue=old_name, parent=self.root)
         if new_name is None or new_name.strip() == old_name:
             return
@@ -764,46 +837,57 @@ class MainWindow:
         if not new_name:
             return
         if not self.command_manager.rename_page(old_name, new_name):
-            messagebox.showwarning("提示", "页面名称已存在或无效")
+            messagebox.showwarning(t("提示"), t("页面名称已存在或无效"))
             return
-        # 更新 UI
-        idx = self.command_manager.get_pages().index(new_name)
-        self.hist_notebook.tab(idx, text=new_name)
-        self.hist_listboxes[new_name] = self.hist_listboxes.pop(old_name)
+        # 更新 UI：Combobox 值 + 字典 key（注意：Treeview 里挂的 _page_name 也要同步）
+        tree = self.hist_listboxes.pop(old_name, None)
+        frame = self._page_frames.pop(old_name, None)
+        if tree is not None:
+            tree._page_name = new_name
+            self.hist_listboxes[new_name] = tree
+        if frame is not None:
+            self._page_frames[new_name] = frame
+        pages = self.command_manager.get_pages()
+        self.page_selector.configure(values=pages)
+        new_idx = pages.index(new_name)
+        self._current_page_idx = new_idx
+        self.page_selector.current(new_idx)
 
     def _add_new_command_page(self):
         name = simpledialog.askstring(
-            "新增页面", "请输入页面名称：", parent=self.root)
+            t("新增页面"), t("请输入页面名称："), parent=self.root)
         if name is None:
             return
         name = name.strip()
         if not name:
             return
         if not self.command_manager.add_page(name):
-            messagebox.showwarning("提示", "页面名称已存在")
+            messagebox.showwarning(t("提示"), t("页面名称已存在"))
             return
         self._add_command_tab(name)
-        self.hist_notebook.select(len(self.command_manager.get_pages()) - 1)
+        self._switch_to_page(len(self.command_manager.get_pages()) - 1)
 
     def _delete_current_command_page(self):
         pages = self.command_manager.get_pages()
         if len(pages) <= 1:
-            messagebox.showwarning("提示", "至少需要保留一个页面")
+            messagebox.showwarning(t("提示"), t("至少需要保留一个页面"))
             return
         page_name = self._get_current_page_name()
         if not messagebox.askyesno(
-                "确认", f"确定删除页面「{page_name}」及其所有命令？"):
+                t("确认"), t("确定删除页面「{page_name}」及其所有命令？").format(page_name=page_name)):
             return
-        # 先记下当前索引，再删数据，最后 forget 该 tab
-        cur_idx = self.hist_notebook.index('current')
+        cur_idx = self._current_page_idx
         self.command_manager.remove_page(page_name)
         self.hist_listboxes.pop(page_name, None)
-        self.hist_notebook.forget(cur_idx)
-        # 选中邻近的 tab
-        if cur_idx >= self.hist_notebook.index('end'):
-            cur_idx = self.hist_notebook.index('end') - 1
-        if cur_idx >= 0:
-            self.hist_notebook.select(cur_idx)
+        frame = self._page_frames.pop(page_name, None)
+        if frame is not None:
+            frame.pack_forget()
+            frame.destroy()
+        # 选邻近索引并刷新 Combobox + 显示
+        new_pages = self.command_manager.get_pages()
+        if cur_idx >= len(new_pages):
+            cur_idx = len(new_pages) - 1
+        self._switch_to_page(cur_idx if cur_idx >= 0 else 0)
 
     def _add_command_to_current_page(self):
         """打开"添加命令"对话框，添加到当前页面"""
@@ -826,7 +910,7 @@ class MainWindow:
             existing = cmds[edit_idx]
 
         dialog = tk.Toplevel(self.root)
-        dialog.title("编辑命令" if is_edit else "添加命令")
+        dialog.title(t("编辑命令") if is_edit else t("添加命令"))
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -835,20 +919,20 @@ class MainWindow:
         frame.pack(fill=tk.BOTH, expand=True)
 
         # 模式
-        ttk.Label(frame, text="模式:").grid(row=0, column=0, sticky='w', pady=4)
+        ttk.Label(frame, text=t("模式:")).grid(row=0, column=0, sticky='w', pady=4)
         mode_var = tk.StringVar(value=existing['mode'] if existing else 'string')
         ttk.Combobox(frame, textvariable=mode_var,
                      values=['string', 'hex'], width=10,
                      state='readonly').grid(row=0, column=1, sticky='w', pady=4, padx=4)
 
         # 标签
-        ttk.Label(frame, text="标签:").grid(row=1, column=0, sticky='w', pady=4)
+        ttk.Label(frame, text=t("标签:")).grid(row=1, column=0, sticky='w', pady=4)
         label_var = tk.StringVar(value=(existing or {}).get('label', ''))
         ttk.Entry(frame, textvariable=label_var, width=30).grid(
             row=1, column=1, sticky='w', pady=4, padx=4)
 
         # 内容
-        ttk.Label(frame, text="内容:").grid(row=2, column=0, sticky='nw', pady=4)
+        ttk.Label(frame, text=t("内容:")).grid(row=2, column=0, sticky='nw', pady=4)
         content_text = tk.Text(frame, width=30, height=4,
                                font=('Consolas', 10), undo=True)
         content_text.grid(row=2, column=1, sticky='w', pady=4, padx=4)
@@ -870,10 +954,11 @@ class MainWindow:
                 return False
             invalid = set(cleaned) - set('0123456789ABCDEF')
             if invalid:
-                hint.configure(text=f"非法字符: {', '.join(sorted(invalid))}")
+                hint.configure(text=t("非法字符: {chars}").format(
+                    chars=', '.join(sorted(invalid))))
                 return False
             if len(cleaned) % 2 != 0:
-                hint.configure(text="Hex 长度必须为偶数")
+                hint.configure(text=t("Hex 长度必须为偶数"))
                 return False
             hint.configure(text="")
             return True
@@ -886,10 +971,10 @@ class MainWindow:
             content = content_text.get('1.0', tk.END).strip()
             label = label_var.get().strip()
             if not content:
-                messagebox.showwarning("提示", "内容不能为空", parent=dialog)
+                messagebox.showwarning(t("提示"), t("内容不能为空"), parent=dialog)
                 return
             if mode == 'hex' and not validate_hex():
-                messagebox.showwarning("提示", "Hex 格式错误", parent=dialog)
+                messagebox.showwarning(t("提示"), t("Hex 格式错误"), parent=dialog)
                 return
             if is_edit:
                 self.command_manager.update_command(page, edit_idx, content, mode, label)
@@ -900,19 +985,49 @@ class MainWindow:
 
         btn = ttk.Frame(frame)
         btn.grid(row=4, column=0, columnspan=2, pady=(8, 0))
-        ttk.Button(btn, text="确定", command=on_ok).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn, text=t("确定"), command=on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn, text=t("取消"), command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
         self._center_dialog(dialog)
         self.root.wait_window(dialog)
 
     def _apply_hist_width(self):
-        """应用历史面板宽度"""
+        """手动宽度输入 → 应用（sashpos 是分割线 x 坐标，需换算：位置 = 总宽 - 面板宽）"""
         try:
             w = self.hist_width_var.get()
-            w = max(100, min(500, w))
-            self.hist_frame.configure(width=w)
+            w = max(100, min(800, w))
             self.hist_panel_width = w
+            self._set_right_panel_width(w)
+        except Exception:
+            pass
+
+    def _set_right_panel_width(self, w):
+        """设置右侧面板宽度为 w（实测补偿 sash 开销，保证实际宽度 == 设置值）"""
+        try:
+            self.content_pw.update_idletasks()
+            pw_w = self.content_pw.winfo_width()
+            if pw_w <= 10:
+                # 窗口尚未完成布局，稍后重试
+                self.root.after(100, lambda: self._set_right_panel_width(w))
+                return
+            # sashpos 与面板实际宽度之间有一段固定开销（sash 宽度等），
+            # 实测后补偿，否则实际宽度会比设置值偏小
+            overhead = pw_w - self.content_pw.sashpos(0) - self.hist_frame.winfo_width()
+            if 0 <= overhead <= 30:
+                self._pw_overhead = overhead
+            else:
+                overhead = getattr(self, '_pw_overhead', 0)
+            self.content_pw.sashpos(0, max(0, pw_w - w - overhead))
+        except Exception:
+            pass
+
+    def _sync_hist_width_from_sash(self, _event=None):
+        """拖动 sash 后同步实际宽度，使 Spinbox/保存设置与实际一致"""
+        try:
+            w = self.hist_frame.winfo_width()
+            if w and hasattr(self, 'hist_width_var'):
+                self.hist_width_var.set(w)
+                self.hist_panel_width = w
         except Exception:
             pass
 
@@ -922,15 +1037,17 @@ class MainWindow:
         self.status_frame = ttk.Frame(self.root)
         self.status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=6, pady=2)
 
-        self.status_label = ttk.Label(self.status_frame, text="状态: 未连接",
+        self.status_label = ttk.Label(self.status_frame, text=t("状态: 未连接"),
                                       style='Status.TLabel',
                                       foreground=get_color('error'))
         self.status_label.pack(side=tk.LEFT)
 
-        self.recv_count_label = ttk.Label(self.status_frame, text="接收: 0 字节")
+        self.recv_count_label = ttk.Label(
+            self.status_frame, text=t("接收: {n} 字节").format(n=0))
         self.recv_count_label.pack(side=tk.RIGHT, padx=10)
 
-        self.send_count_label = ttk.Label(self.status_frame, text="发送: 0 字节")
+        self.send_count_label = ttk.Label(
+            self.status_frame, text=t("发送: {n} 字节").format(n=0))
         self.send_count_label.pack(side=tk.RIGHT, padx=10)
 
         self.send_status_label = ttk.Label(self.status_frame, text="")
@@ -939,23 +1056,7 @@ class MainWindow:
     # ==================== 事件绑定 ====================
 
     def setup_connections(self):
-        # 接收模式切换
-        self.recv_notebook.bind('<<NotebookTabChanged>>',
-                                self._on_recv_tab_changed)
-
-        # 发送模式切换
-        self.send_notebook.bind('<<NotebookTabChanged>>',
-                                self._on_send_tab_changed)
-
-        # HEX 输入验证
-        self.hex_input.bind(
-            '<KeyRelease>', lambda e: self.validate_hex_input())
-
-        # 命令列表事件已在 _add_command_tab 中绑定
-
-        # Enter 发送
-        self.string_input.bind('<Return>', self._on_string_enter)
-        self.string_input.bind('<Control-Return>', self._on_ctrl_enter)
+        self._bind_widget_events()
 
         # 勾选项变化时保存设置
         for var in [self.timestamp_var, self.direction_var, self.echo_var,
@@ -983,6 +1084,75 @@ class MainWindow:
             var.trace_add('write', lambda *_: self.save_settings())
 
         self._reconnect_timer_id = None  # 防抖定时器
+
+    def _bind_widget_events(self):
+        """控件级事件绑定（语言切换重建 UI 后需重新执行；
+        变量 trace 不在此处，避免重复注册）"""
+        # 接收模式切换
+        self.recv_notebook.bind('<<NotebookTabChanged>>',
+                                self._on_recv_tab_changed)
+
+        # 发送模式切换
+        self.send_notebook.bind('<<NotebookTabChanged>>',
+                                self._on_send_tab_changed)
+
+        # HEX 输入验证
+        self.hex_input.bind(
+            '<KeyRelease>', lambda e: self.validate_hex_input())
+
+        # 命令列表事件已在 _add_command_tab 中绑定
+
+        # Enter 发送
+        self.string_input.bind('<Return>', self._on_string_enter)
+        self.string_input.bind('<Control-Return>', self._on_ctrl_enter)
+
+    # ==================== 语言切换 ====================
+
+    def _switch_language(self):
+        """切换中英文：销毁全部控件后按新语言重建，保留运行时状态"""
+        lang = self.language_var.get()
+        if lang == get_language():
+            return
+        set_language(lang)
+        self.save_settings()  # 保存语言选择
+
+        # 记录需要恢复的 UI 状态
+        send_tab = self.send_notebook.index('current')
+        recv_tab = self.recv_notebook.index('current')
+        page_idx = self._current_page_idx
+
+        # 波形窗口随语言一起关闭（可随时重新打开）
+        self._close_waveform()
+
+        # 销毁全部控件，按新语言重建
+        for child in self.root.winfo_children():
+            child.destroy()
+        self.create_serial_control_bar()
+        self.create_main_content()
+        self.create_status_bar()
+        self._bind_widget_events()
+        self.on_theme_applied()  # 配色 + 重建菜单
+
+        # ── 恢复运行时状态 ──
+        self.refresh_ports_ui()
+        self.connect_btn.configure(
+            text=t("断开") if self.is_connected else t("连接"))
+        self.pause_btn.configure(
+            text=t("继续显示") if self.is_paused else t("暂停显示"))
+        if self.is_connected:
+            port = self.port_var.get().split(' - ')[0]
+            self.status_label.configure(
+                text=t("状态: 已连接 {port}").format(port=port),
+                foreground=get_color('success'))
+        self.update_counts()
+        self.auto_reply_btn.configure(
+            text=t("关闭自动应答") if self.auto_reply_enabled else t("开启自动应答"))
+        self._refresh_reply_rules_list()
+        self._switch_to_page(page_idx)
+        self.send_notebook.select(send_tab)
+        self._on_send_tab_changed(None)
+        self.recv_notebook.select(recv_tab)
+        self._set_right_panel_width(self.hist_panel_width)
 
     def _on_recv_tab_changed(self, event):
         pass
@@ -1047,7 +1217,7 @@ class MainWindow:
             # 如果已连接的串口消失，自动断开
             if self.is_connected and saved not in current_names:
                 self.disconnect_serial()
-                messagebox.showwarning("提示", "串口已断开！")
+                messagebox.showwarning(t("提示"), t("串口已断开！"))
 
     def refresh_ports(self):
         ports = self.serial_manager.scan_ports()
@@ -1074,7 +1244,7 @@ class MainWindow:
         port_text = self.port_var.get()
         if not port_text:
             if not silent:
-                messagebox.showwarning("错误", "请选择串口！")
+                messagebox.showwarning(t("错误"), t("请选择串口！"))
             return False
 
         port_name = port_text.split(' - ')[0]
@@ -1083,7 +1253,7 @@ class MainWindow:
             baudrate = int(self.baudrate_var.get())
         except ValueError:
             if not silent:
-                messagebox.showwarning("错误", "波特率必须是数字！")
+                messagebox.showwarning(t("错误"), t("波特率必须是数字！"))
             return False
 
         databits = int(self.databits_var.get())
@@ -1100,9 +1270,10 @@ class MainWindow:
 
         if success:
             self.is_connected = True
-            self.status_label.configure(text=f"状态: 已连接 {port_name}",
-                                        foreground=get_color('success'))
-            self.connect_btn.configure(text="断开")
+            self.status_label.configure(
+                text=t("状态: 已连接 {port}").format(port=port_name),
+                foreground=get_color('success'))
+            self.connect_btn.configure(text=t("断开"))
 
             self.receive_thread = ReceiveThread(
                 self.serial_manager,
@@ -1122,7 +1293,8 @@ class MainWindow:
             return True
         else:
             if not silent:
-                messagebox.showerror("连接失败", f"无法连接串口: {message}")
+                messagebox.showerror(t("连接失败"),
+                                      t("无法连接串口: {msg}").format(msg=message))
                 if self.auto_reconnect_var.get():
                     self._start_reconnect_timer()
             return False
@@ -1134,9 +1306,9 @@ class MainWindow:
 
         self.serial_manager.disconnect()
         self.is_connected = False
-        self.status_label.configure(text="状态: 未连接",
+        self.status_label.configure(text=t("状态: 未连接"),
                                     foreground=get_color('error'))
-        self.connect_btn.configure(text="连接")
+        self.connect_btn.configure(text=t("连接"))
 
         if self.loop_timer_id:
             self.root.after_cancel(self.loop_timer_id)
@@ -1175,7 +1347,7 @@ class MainWindow:
             self.receive_thread.recv_timeout = timeout
 
     def _calc_auto_timeout(self):
-        """根据当前波特率自动计算超时时间（微秒），为字节间隔的5倍"""
+        """根据当前波特率自动计算超时时间（毫秒），为字节间隔的5倍"""
         try:
             baudrate = int(self.baudrate_var.get())
         except (ValueError, tk.TclError):
@@ -1192,9 +1364,9 @@ class MainWindow:
         parity_bits = 0 if parity == 'None' else 1
         bits_per_byte = 1 + databits + parity_bits + stopbits
         # 字节间隔(秒) = bits_per_byte / baudrate
-        # 转换为微秒，5倍
-        timeout_us = int(bits_per_byte / baudrate * 1_000_000 * 5)
-        return max(timeout_us, 100)  # 最小100us
+        # 转换为毫秒，5倍
+        timeout_ms = int(bits_per_byte / baudrate * 1000 * 5)
+        return max(timeout_ms, 1)  # 最小1ms
 
     def _on_data_from_thread(self, data):
         """从接收线程调用 - 通过 root.after 安排 UI 更新"""
@@ -1214,9 +1386,9 @@ class MainWindow:
             timeout = self._calc_auto_timeout()
         if timeout > 0 and self.received_data:
             last_ts = self.received_data[-1].get('timestamp', 0)
-            elapsed_us = (time.time() - last_ts) * 1_000_000
-            if elapsed_us > timeout:
-                for tw in [self.string_recv_text, self.hex_recv_text]:
+            elapsed_ms = (time.time() - last_ts) * 1000
+            if elapsed_ms > timeout:
+                for tw in [self.string_recv_text, self.hex_recv_text, self.compare_recv_text]:
                     self._append_text(tw, "\n", ('timeout',))
 
         self.recv_bytes += len(data)
@@ -1254,8 +1426,8 @@ class MainWindow:
             self._process_auto_reply(data, string_data)
 
     def on_receive_error(self, error_msg):
-        for tw in [self.string_recv_text, self.hex_recv_text]:
-            self._append_text(tw, f"[错误] {error_msg}\n", ('error',))
+        for tw in [self.string_recv_text, self.hex_recv_text, self.compare_recv_text]:
+            self._append_text(tw, t("[错误] {msg}\n").format(msg=error_msg), ('error',))
 
     def update_recv_displays(self, raw_data, string_data, is_recv):
         if not is_recv and not self.echo_var.get():
@@ -1311,8 +1483,23 @@ class MainWindow:
         tags.append('recv' if is_recv else 'send')
         self._append_text_rich(self.hex_recv_text, parts, tags)
 
+        # 对照显示：HEX 在上，字符串在下，一上一下同时展示
+        parts = []
+        tags = []
+        if ts:
+            parts.append(f"[{ts}] ")
+            tags.append('timestamp')
+        if direction:
+            parts.append(f"{direction} ")
+            tags.append('text_color')
+        parts.append(f"HEX: {hex_text}\n")
+        tags.append('recv' if is_recv else 'send')
+        parts.append(f"ASC: {string_data}\n\n")
+        tags.append('recv' if is_recv else 'send')
+        self._append_text_rich(self.compare_recv_text, parts, tags)
+
     def clear_receive_area(self):
-        for tw in [self.string_recv_text, self.hex_recv_text]:
+        for tw in [self.string_recv_text, self.hex_recv_text, self.compare_recv_text]:
             tw.configure(state=tk.NORMAL)
             tw.delete('1.0', tk.END)
             tw.configure(state=tk.DISABLED)
@@ -1322,7 +1509,8 @@ class MainWindow:
 
     def toggle_pause(self):
         self.is_paused = not self.is_paused
-        self.pause_btn.configure(text="继续显示" if self.is_paused else "暂停显示")
+        self.pause_btn.configure(
+            text=t("继续显示") if self.is_paused else t("暂停显示"))
 
     # ==================== 数据发送 ====================
 
@@ -1339,7 +1527,9 @@ class MainWindow:
             try:
                 data = text.encode(encoding)
             except UnicodeEncodeError as e:
-                messagebox.showwarning("编码错误", f"无法用{encoding}编码: {e}")
+                messagebox.showwarning(
+                    t("编码错误"),
+                    t("无法用{encoding}编码: {e}").format(encoding=encoding, e=e))
                 return
         else:
             hex_text = self.hex_input.get('1.0', tk.END).strip()
@@ -1348,11 +1538,11 @@ class MainWindow:
             self.validate_hex_input()
             if self.hex_status_label.cget('text'):
                 messagebox.showwarning(
-                    "错误", self.hex_status_label.cget('text'))
+                    t("错误"), self.hex_status_label.cget('text'))
                 return
             data = self.parse_hex_input(hex_text)
             if data is None:
-                messagebox.showwarning("错误", "无效的Hex数据格式！")
+                messagebox.showwarning(t("错误"), t("无效的Hex数据格式！"))
                 return
 
         # 校验自动添加
@@ -1376,7 +1566,7 @@ class MainWindow:
             self.update_recv_displays(data, string_data, is_recv=False)
 
         if not self.is_connected:
-            messagebox.showwarning("提示", "未连接串口，数据仅作为回显显示！")
+            messagebox.showwarning(t("提示"), t("未连接串口，数据仅作为回显显示！"))
             return
 
         if success:
@@ -1393,9 +1583,9 @@ class MainWindow:
             self.send_history_results.append(False)
             if not self.serial_manager.is_connected and self.is_connected:
                 self.is_connected = False
-                self.status_label.configure(text="状态: 未连接",
+                self.status_label.configure(text=t("状态: 未连接"),
                                             foreground=get_color('error'))
-                messagebox.showwarning("发送失败", "串口连接已断开！")
+                messagebox.showwarning(t("发送失败"), t("串口连接已断开！"))
                 if self.auto_reconnect_var.get():
                     self._start_reconnect_timer()
 
@@ -1411,7 +1601,7 @@ class MainWindow:
         if self.loop_var.get():
             # 勾选：开始循环
             if not self.is_connected:
-                messagebox.showwarning("错误", "请先连接串口！")
+                messagebox.showwarning(t("错误"), t("请先连接串口！"))
                 self.loop_var.set(False)
                 return
             self.loop_sent_count = 0
@@ -1445,9 +1635,10 @@ class MainWindow:
         valid = set('0123456789ABCDEF')
         invalid = set(cleaned) - valid
         if invalid:
-            self.hex_status_label.configure(text=f"非法字符: {', '.join(invalid)}")
+            self.hex_status_label.configure(
+                text=t("非法字符: {chars}").format(chars=', '.join(invalid)))
         elif len(cleaned) % 2 != 0:
-            self.hex_status_label.configure(text="Hex数据长度必须为偶数")
+            self.hex_status_label.configure(text=t("Hex数据长度必须为偶数"))
         else:
             self.hex_status_label.configure(text="")
 
@@ -1469,7 +1660,7 @@ class MainWindow:
         """
         start = self._safe_int(self.checksum_start_var, 0)
         end_str = self.checksum_end_var.get()
-        if end_str == '末尾':
+        if end_str in ('末尾', 'End'):  # 值随语言显示，双语兼容判断
             insert_pos = len(data)
         else:
             try:
@@ -1733,8 +1924,8 @@ class MainWindow:
         tree.selection_set(iid)
 
         menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label="编辑命令", command=self.edit_selected_command)
-        menu.add_command(label="删除命令", command=self.delete_selected_command)
+        menu.add_command(label=t("编辑命令"), command=self.edit_selected_command)
+        menu.add_command(label=t("删除命令"), command=self.delete_selected_command)
         menu.tk_popup(event.x_root, event.y_root)
 
     def delete_selected_command(self):
@@ -1760,18 +1951,68 @@ class MainWindow:
             return
         self._command_dialog(page, edit_idx=idx)
 
+    # ==================== 命令剪切/粘贴重排 ====================
+
+    def _select_command_index(self, tree, idx: int):
+        """选中并滚动到指定索引的命令行"""
+        children = tree.get_children()
+        if 0 <= idx < len(children):
+            tree.selection_set(children[idx])
+            tree.see(children[idx])
+
+    def _on_command_cut(self, event):
+        """Ctrl+X：剪切选中命令到内部剪切板"""
+        tree = event.widget
+        idx = self._tree_selected_index(tree)
+        if idx is None:
+            return 'break'
+        page = tree._page_name
+        commands = self.command_manager.get_full_commands(page)
+        if idx >= len(commands):
+            return 'break'
+        self._cmd_clipboard = dict(commands[idx])
+        self.command_manager.remove_command(page, idx)
+        self._update_current_command_list(page)
+        # 选中原来被剪切位置的后一条（保持连续操作手感）
+        remaining = len(commands) - 1
+        if remaining > 0:
+            self._select_command_index(tree, min(idx, remaining - 1))
+        return 'break'
+
+    def _on_command_paste(self, event):
+        """Ctrl+V：粘贴剪切板命令到选中行的下一行（未选中则追加到末尾）"""
+        if not self._cmd_clipboard:
+            return 'break'
+        tree = event.widget
+        page = tree._page_name
+        idx = self._tree_selected_index(tree)
+        commands = self.command_manager.get_full_commands(page)
+        if idx is None or idx >= len(commands):
+            insert_at = len(commands)
+        else:
+            insert_at = idx + 1
+        self.command_manager.insert_command(page, insert_at, self._cmd_clipboard)
+        self._update_current_command_list(page)
+        self._select_command_index(tree, insert_at)
+        return 'break'
+
     # ==================== 波形显示 ====================
 
     def toggle_waveform(self):
         if self.waveform_window and self.waveform_window.winfo_exists():
-            self.waveform_window.destroy()
-            self.waveform_window = None
-            self.waveform_fig = None
-            self.waveform_ax = None
-            self.waveform_line = None
-            self.waveform_canvas = None
+            self._close_waveform()
         else:
             self.create_waveform_window()
+
+    def _close_waveform(self):
+        """关闭波形窗口并清理引用"""
+        if self.waveform_window and self.waveform_window.winfo_exists():
+            self.waveform_window.destroy()
+        self.waveform_window = None
+        self.waveform_fig = None
+        self.waveform_ax = None
+        self.waveform_line = None
+        self.waveform_canvas = None
 
     def create_waveform_window(self):
         try:
@@ -1779,28 +2020,29 @@ class MainWindow:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
         except ImportError:
             messagebox.showwarning(
-                "提示", "matplotlib 未安装，波形显示功能不可用。\n请运行: pip install matplotlib")
+                t("提示"),
+                t("matplotlib 未安装，波形显示功能不可用。\n请运行: pip install matplotlib"))
             return
 
         self.waveform_window = tk.Toplevel(self.root)
-        self.waveform_window.title("波形显示")
+        self.waveform_window.title(t("波形显示"))
         self.waveform_window.geometry("800x500")
 
         # 控制栏
         ctrl = ttk.Frame(self.waveform_window)
         ctrl.pack(fill=tk.X, padx=4, pady=2)
 
-        ttk.Label(ctrl, text="字节大小:").pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl, text=t("字节大小:")).pack(side=tk.LEFT, padx=2)
         self.waveform_bytesize_var = tk.StringVar(
-            value="32位" if self.waveform_bytesize == 4 else "16位")
+            value=t("32位") if self.waveform_bytesize == 4 else t("16位"))
         ttk.Combobox(ctrl, textvariable=self.waveform_bytesize_var,
-                     values=["16位", "32位"], state='readonly', width=6).pack(side=tk.LEFT, padx=2)
+                     values=[t("16位"), t("32位")], state='readonly', width=6).pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(ctrl, text="字节序:").pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl, text=t("字节序:")).pack(side=tk.LEFT, padx=2)
         self.waveform_endian_var = tk.StringVar(
-            value="大端" if self.waveform_endian == 'big' else "小端")
+            value=t("大端") if self.waveform_endian == 'big' else t("小端"))
         ttk.Combobox(ctrl, textvariable=self.waveform_endian_var,
-                     values=["小端", "大端"], state='readonly', width=6).pack(side=tk.LEFT, padx=2)
+                     values=[t("小端"), t("大端")], state='readonly', width=6).pack(side=tk.LEFT, padx=2)
 
         # 字节大小/字节序变化时回写到实例属性并持久化
         self.waveform_bytesize_var.trace_add(
@@ -1808,9 +2050,9 @@ class MainWindow:
         self.waveform_endian_var.trace_add(
             'write', lambda *_: self._sync_waveform_format())
 
-        ttk.Button(ctrl, text="清空波形", command=self.clear_waveform).pack(
+        ttk.Button(ctrl, text=t("清空波形"), command=self.clear_waveform).pack(
             side=tk.LEFT, padx=4)
-        ttk.Button(ctrl, text="保存图片", command=self.save_waveform_image).pack(
+        ttk.Button(ctrl, text=t("保存图片"), command=self.save_waveform_image).pack(
             side=tk.LEFT, padx=4)
 
         # Matplotlib 图表
@@ -1819,8 +2061,8 @@ class MainWindow:
         self.waveform_ax = self.waveform_fig.add_subplot(111)
         self.waveform_ax.set_facecolor(get_color('bg_input'))
         self.waveform_ax.tick_params(colors=get_color('text'))
-        self.waveform_xlabel = self.waveform_settings.get('xlabel', '采样点')
-        self.waveform_ylabel = self.waveform_settings.get('ylabel', '数值')
+        self.waveform_xlabel = self.waveform_settings.get('xlabel', t('采样点'))
+        self.waveform_ylabel = self.waveform_settings.get('ylabel', t('数值'))
         self.waveform_ax.set_xlabel(
             self.waveform_xlabel, color=get_color('text'))
         self.waveform_ax.set_ylabel(
@@ -1851,17 +2093,17 @@ class MainWindow:
         self.waveform_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # 轴设置区域
-        axis_frame = ttk.LabelFrame(self.waveform_window, text="轴设置")
+        axis_frame = ttk.LabelFrame(self.waveform_window, text=t("轴设置"))
         axis_frame.pack(fill=tk.X, padx=4, pady=2)
 
         # X轴
         x_row = ttk.Frame(axis_frame)
         x_row.pack(fill=tk.X, padx=4, pady=2)
-        ttk.Label(x_row, text="X轴标签:").pack(side=tk.LEFT)
+        ttk.Label(x_row, text=t("X轴标签:")).pack(side=tk.LEFT)
         self.wf_xlabel_var = tk.StringVar(value=self.waveform_xlabel)
         ttk.Entry(x_row, textvariable=self.wf_xlabel_var,
                   width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Label(x_row, text="范围:").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(x_row, text=t("范围:")).pack(side=tk.LEFT, padx=(8, 0))
         self.wf_xlim_min_var = tk.StringVar(
             value=str(ws.get('xlim', [None, None])[0]) if ws.get('xlim') else "")
         self.wf_xlim_max_var = tk.StringVar(
@@ -1875,11 +2117,11 @@ class MainWindow:
         # Y轴
         y_row = ttk.Frame(axis_frame)
         y_row.pack(fill=tk.X, padx=4, pady=2)
-        ttk.Label(y_row, text="Y轴标签:").pack(side=tk.LEFT)
+        ttk.Label(y_row, text=t("Y轴标签:")).pack(side=tk.LEFT)
         self.wf_ylabel_var = tk.StringVar(value=self.waveform_ylabel)
         ttk.Entry(y_row, textvariable=self.wf_ylabel_var,
                   width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Label(y_row, text="范围:").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(y_row, text=t("范围:")).pack(side=tk.LEFT, padx=(8, 0))
         self.wf_ylim_min_var = tk.StringVar(
             value=str(ws.get('ylim', [None, None])[0]) if ws.get('ylim') else "")
         self.wf_ylim_max_var = tk.StringVar(
@@ -1890,7 +2132,7 @@ class MainWindow:
         ttk.Entry(y_row, textvariable=self.wf_ylim_max_var,
                   width=8).pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(y_row, text="应用", command=self._apply_waveform_axis_settings).pack(
+        ttk.Button(y_row, text=t("应用"), command=self._apply_waveform_axis_settings).pack(
             side=tk.LEFT, padx=8)
 
         self.waveform_fig.tight_layout()
@@ -1942,8 +2184,8 @@ class MainWindow:
         """波形字节大小/字节序变化时同步到实例属性并持久化"""
         if not hasattr(self, 'waveform_bytesize_var'):
             return
-        self.waveform_bytesize = 4 if self.waveform_bytesize_var.get() == "32位" else 2
-        self.waveform_endian = 'big' if self.waveform_endian_var.get() == "大端" else 'little'
+        self.waveform_bytesize = 4 if self.waveform_bytesize_var.get() in ("32位", "32-bit") else 2
+        self.waveform_endian = 'big' if self.waveform_endian_var.get() in ("大端", "Big Endian") else 'little'
         self.save_settings()
 
     def update_waveform(self, data):
@@ -1951,8 +2193,8 @@ class MainWindow:
             return
 
         # 波形窗口已打开时 waveform_bytesize_var / waveform_endian_var 必然存在
-        bs = 2 if self.waveform_bytesize_var.get() == "16位" else 4
-        endian = 'little' if self.waveform_endian_var.get() == "小端" else 'big'
+        bs = 2 if self.waveform_bytesize_var.get() in ("16位", "16-bit") else 4
+        endian = 'little' if self.waveform_endian_var.get() in ("小端", "Little Endian") else 'big'
 
         try:
             for i in range(0, len(data), bs):
@@ -1994,15 +2236,15 @@ class MainWindow:
         if not self.waveform_fig:
             return
         path = filedialog.asksaveasfilename(
-            title="保存波形图片",
-            filetypes=[("PNG图片", "*.png"), ("所有文件", "*.*")]
+            title=t("保存波形图片"),
+            filetypes=[(t("PNG图片"), "*.png"), (t("所有文件"), "*.*")]
         )
         if path:
             try:
                 self.waveform_fig.savefig(path, dpi=150, bbox_inches='tight')
-                messagebox.showinfo("成功", f"波形图片已保存到: {path}")
+                messagebox.showinfo(t("成功"), t("波形图片已保存到: {path}").format(path=path))
             except Exception as e:
-                messagebox.showwarning("错误", f"保存失败: {e}")
+                messagebox.showwarning(t("错误"), t("保存失败: {e}").format(e=e))
 
     # ==================== 数据记录 ====================
 
@@ -2021,11 +2263,11 @@ class MainWindow:
             self.log_file = open(self.log_file_path, 'w',
                                  newline='', encoding='utf-8')
             self.log_writer = csv.writer(self.log_file)
-            self.log_writer.writerow(["时间", "类型", "数据"])
+            self.log_writer.writerow([t("时间"), t("类型"), t("数据")])
             self.log_start_time = datetime.now()
             self.log_file_size = 0
         except Exception as e:
-            messagebox.showwarning("错误", f"无法开始记录: {e}")
+            messagebox.showwarning(t("错误"), t("无法开始记录: {e}").format(e=e))
 
     def stop_log(self):
         if self.log_file:
@@ -2050,13 +2292,13 @@ class MainWindow:
 
     def export_data(self):
         if not self.received_data:
-            messagebox.showwarning("错误", "没有数据可导出！")
+            messagebox.showwarning(t("错误"), t("没有数据可导出！"))
             return
 
         path = filedialog.asksaveasfilename(
-            title="导出数据",
-            filetypes=[("文本文件", "*.txt"), ("CSV文件", "*.csv"),
-                       ("二进制文件", "*.bin"), ("所有文件", "*.*")]
+            title=t("导出数据"),
+            filetypes=[(t("文本文件"), "*.txt"), (t("CSV文件"), "*.csv"),
+                       (t("二进制文件"), "*.bin"), (t("所有文件"), "*.*")]
         )
         if not path:
             return
@@ -2070,7 +2312,7 @@ class MainWindow:
             elif ext == '.csv':
                 with open(path, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(["时间", "类型", "数据"])
+                    writer.writerow([t("时间"), t("类型"), t("数据")])
                     for item in self.received_data:
                         ts = datetime.fromtimestamp(
                             item['timestamp']).strftime("%H:%M:%S.%f")[:-3]
@@ -2082,9 +2324,9 @@ class MainWindow:
                             item['timestamp']).strftime("%H:%M:%S.%f")[:-3]
                         f.write(f"[{ts}] [RX] {item['string']}\n")
 
-            messagebox.showinfo("成功", f"数据已导出到: {path}")
+            messagebox.showinfo(t("成功"), t("数据已导出到: {path}").format(path=path))
         except Exception as e:
-            messagebox.showwarning("错误", f"导出失败: {e}")
+            messagebox.showwarning(t("错误"), t("导出失败: {e}").format(e=e))
 
     # ==================== 自动重连 ====================
 
@@ -2106,13 +2348,14 @@ class MainWindow:
         if self.reconnect_count > max_times:
             # 达到最大次数：仅状态栏提示，不弹模态框
             self.status_label.configure(
-                text=f"状态: 自动重连失败（已达最大次数 {max_times}）",
+                text=t("状态: 自动重连失败（已达最大次数 {n}）").format(n=max_times),
                 foreground=get_color('error'))
             return
 
         # 状态栏提示重连进度
         self.status_label.configure(
-            text=f"状态: 正在重连 {self.reconnect_count}/{max_times}...",
+            text=t("状态: 正在重连 {cur}/{max}...").format(
+                cur=self.reconnect_count, max=max_times),
             foreground=get_color('timestamp'))
 
         # 静默连接：失败不弹窗、不重复启动定时器（由本函数统一调度）
@@ -2143,15 +2386,19 @@ class MainWindow:
         ttk 控件由 ttkbootstrap 主题自动接管，无需手动配色。
         颜色全部取自当前主题色板（get_color），不自定义颜色表。
         """
-        # 统一 Treeview 外观：字体与 Text 控件一致、行高统一、去缩进
+        # 统一 Treeview 外观：字体与 Text 控件一致、去缩进
+        # 行高按中文回退字体的实际测量值动态计算（点数会随 DPI 缩放，
+        # 写死像素行高在高分屏下会裁切中文），上下留余量实现垂直居中
         style = ttk.Style()
+        cn_font = tkfont.Font(family='Microsoft YaHei', size=10)
+        row_height = max(24, cn_font.metrics('linespace') + 10)
         style.configure('Treeview', font=('Consolas', 10),
-                        rowheight=24, indent=0)
+                        rowheight=row_height, indent=0)
         style.configure('Treeview.Heading',
                         font=('Microsoft YaHei', 9, 'bold'), indent=0)
 
         # 接收区文本
-        for tw in [self.string_recv_text, self.hex_recv_text]:
+        for tw in [self.string_recv_text, self.hex_recv_text, self.compare_recv_text]:
             tw.configure(bg=get_color('bg_input'), fg=get_color('text'),
                          insertbackground=get_color('text'),
                          selectbackground=get_color('select_bg'))
@@ -2206,7 +2453,7 @@ class MainWindow:
 
     def show_serial_settings_dialog(self):
         dialog = tk.Toplevel(self.root)
-        dialog.title("串口设置 - 更多设置")
+        dialog.title(t("串口设置 - 更多设置"))
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -2216,7 +2463,7 @@ class MainWindow:
         # 串口选择行
         row0 = ttk.Frame(main)
         row0.pack(fill=tk.X, pady=4)
-        ttk.Label(row0, text="串口:", width=8).pack(side=tk.LEFT)
+        ttk.Label(row0, text=t("串口:"), width=8).pack(side=tk.LEFT)
         port_combo = ttk.Combobox(row0, state='readonly', width=28)
         port_combo.pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
         ports = self.serial_manager.scan_ports()
@@ -2238,13 +2485,13 @@ class MainWindow:
                     port_combo.current(i)
                     break
 
-        ttk.Button(row0, text="刷新", command=refresh,
+        ttk.Button(row0, text=t("刷新"), command=refresh,
                    width=5).pack(side=tk.LEFT, padx=4)
 
         # 波特率
         row1 = ttk.Frame(main)
         row1.pack(fill=tk.X, pady=4)
-        ttk.Label(row1, text="波特率:", width=8).pack(side=tk.LEFT)
+        ttk.Label(row1, text=t("波特率:"), width=8).pack(side=tk.LEFT)
         baud_combo = ttk.Combobox(row1, values=BAUDRATES, width=28)
         baud_combo.set(self.baudrate_var.get())
         baud_combo.pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
@@ -2252,7 +2499,7 @@ class MainWindow:
         # 数据位
         row2 = ttk.Frame(main)
         row2.pack(fill=tk.X, pady=4)
-        ttk.Label(row2, text="数据位:", width=8).pack(side=tk.LEFT)
+        ttk.Label(row2, text=t("数据位:"), width=8).pack(side=tk.LEFT)
         data_combo = ttk.Combobox(row2, values=['5', '6', '7', '8'],
                                   state='readonly', width=28)
         data_combo.set(self.databits_var.get())
@@ -2261,7 +2508,7 @@ class MainWindow:
         # 停止位
         row3 = ttk.Frame(main)
         row3.pack(fill=tk.X, pady=4)
-        ttk.Label(row3, text="停止位:", width=8).pack(side=tk.LEFT)
+        ttk.Label(row3, text=t("停止位:"), width=8).pack(side=tk.LEFT)
         stop_combo = ttk.Combobox(row3, values=['1', '1.5', '2'],
                                   state='readonly', width=28)
         stop_combo.set(self.stopbits_var.get())
@@ -2270,7 +2517,7 @@ class MainWindow:
         # 校验位
         row4 = ttk.Frame(main)
         row4.pack(fill=tk.X, pady=4)
-        ttk.Label(row4, text="校验位:", width=8).pack(side=tk.LEFT)
+        ttk.Label(row4, text=t("校验位:"), width=8).pack(side=tk.LEFT)
         parity_combo = ttk.Combobox(row4, values=['None', 'Even', 'Odd', 'Mark', 'Space'],
                                     state='readonly', width=28)
         parity_combo.set(self.parity_var.get())
@@ -2278,7 +2525,7 @@ class MainWindow:
 
         # 硬件流控制
         rtscts_var = tk.BooleanVar(value=self.rtscts_var.get())
-        ttk.Checkbutton(main, text="启用硬件流控制 (RTS/CTS)",
+        ttk.Checkbutton(main, text=t("启用硬件流控制 (RTS/CTS)"),
                         variable=rtscts_var).pack(anchor=tk.W, pady=4)
 
         ttk.Separator(main, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
@@ -2286,21 +2533,21 @@ class MainWindow:
         # 连接状态与操作
         status_frame = ttk.Frame(main)
         status_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(status_frame, text="连接状态:").pack(side=tk.LEFT)
-        status_lbl = ttk.Label(status_frame, text="已连接" if self.is_connected else "未连接",
+        ttk.Label(status_frame, text=t("连接状态:")).pack(side=tk.LEFT)
+        status_lbl = ttk.Label(status_frame, text=t("已连接") if self.is_connected else t("未连接"),
                                foreground=get_color('success') if self.is_connected else get_color('error'))
         status_lbl.pack(side=tk.LEFT, padx=8)
 
-        btn_text = "断开" if self.is_connected else "连接"
+        btn_text = t("断开") if self.is_connected else t("连接")
         conn_btn = ttk.Button(status_frame, text=btn_text)
         conn_btn.pack(side=tk.RIGHT, padx=4)
 
         def on_connect():
             if self.is_connected:
                 self.disconnect_serial()
-                conn_btn.configure(text="连接")
-                status_lbl.configure(text="未连接", foreground=get_color('error'))
-                self.connect_btn.configure(text="连接")
+                conn_btn.configure(text=t("连接"))
+                status_lbl.configure(text=t("未连接"), foreground=get_color('error'))
+                self.connect_btn.configure(text=t("连接"))
             else:
                 cur = port_combo.get()
                 if cur:
@@ -2312,10 +2559,10 @@ class MainWindow:
                 self.rtscts_var.set(rtscts_var.get())
                 self.connect_serial()
                 if self.is_connected:
-                    conn_btn.configure(text="断开")
+                    conn_btn.configure(text=t("断开"))
                     status_lbl.configure(
-                        text="已连接", foreground=get_color('success'))
-                    self.connect_btn.configure(text="断开")
+                        text=t("已连接"), foreground=get_color('success'))
+                    self.connect_btn.configure(text=t("断开"))
 
         conn_btn.configure(command=on_connect)
 
@@ -2336,8 +2583,8 @@ class MainWindow:
             self.save_settings()
             dialog.destroy()
 
-        ttk.Button(btn_frame, text="确定", command=on_ok).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(btn_frame, text="取消",
+        ttk.Button(btn_frame, text=t("确定"), command=on_ok).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame, text=t("取消"),
                    command=dialog.destroy).pack(side=tk.RIGHT)
 
         # 自适应大小并居中
@@ -2347,8 +2594,8 @@ class MainWindow:
 
     def _show_hex_newline_dialog(self):
         result = simpledialog.askinteger(
-            "HEX换行字节数",
-            "设置HEX显示每多少字节换行（0为不限制）：",
+            t("HEX换行字节数"),
+            t("设置HEX显示每多少字节换行（0为不限制）："),
             initialvalue=self._safe_int(self.hex_newline_count_var, 0),
             minvalue=0, maxvalue=256,
             parent=self.root)
@@ -2358,7 +2605,7 @@ class MainWindow:
 
     def show_reconnect_settings_dialog(self):
         dialog = tk.Toplevel(self.root)
-        dialog.title("自动重连设置")
+        dialog.title(t("自动重连设置"))
         dialog.geometry("380x200")
         dialog.resizable(False, False)
         dialog.transient(self.root)
@@ -2368,16 +2615,16 @@ class MainWindow:
         main.pack(fill=tk.BOTH, expand=True)
 
         ar_var = tk.BooleanVar(value=self.auto_reconnect_var.get())
-        ttk.Checkbutton(main, text="启用自动重连", variable=ar_var).grid(
+        ttk.Checkbutton(main, text=t("启用自动重连"), variable=ar_var).grid(
             row=0, column=0, columnspan=2, sticky=tk.W, pady=4)
 
-        ttk.Label(main, text="间隔 (秒):").grid(
+        ttk.Label(main, text=t("间隔 (秒):")).grid(
             row=1, column=0, sticky=tk.W, pady=4)
         interval_spin = ttk.Spinbox(main, from_=1, to=30, width=10)
         interval_spin.set(self.reconnect_interval_var.get())
         interval_spin.grid(row=1, column=1, sticky=tk.W, pady=4, padx=4)
 
-        ttk.Label(main, text="最大次数:").grid(
+        ttk.Label(main, text=t("最大次数:")).grid(
             row=2, column=0, sticky=tk.W, pady=4)
         max_spin = ttk.Spinbox(main, from_=1, to=999, width=10)
         max_spin.set(self.reconnect_max_var.get())
@@ -2392,15 +2639,15 @@ class MainWindow:
 
         btn_frame = ttk.Frame(main)
         btn_frame.grid(row=3, column=0, columnspan=2, pady=(15, 0))
-        ttk.Button(btn_frame, text="确定", command=on_ok).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(btn_frame, text="取消",
+        ttk.Button(btn_frame, text=t("确定"), command=on_ok).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame, text=t("取消"),
                    command=dialog.destroy).pack(side=tk.RIGHT)
 
         self.root.wait_window(dialog)
 
     def show_record_dialog(self):
         dialog = tk.Toplevel(self.root)
-        dialog.title("数据记录")
+        dialog.title(t("数据记录"))
         dialog.geometry("400x200")
         dialog.resizable(False, False)
         dialog.transient(self.root)
@@ -2410,86 +2657,28 @@ class MainWindow:
         main.pack(fill=tk.BOTH, expand=True)
 
         is_recording = self.log_file is not None
-        btn_text = "停止记录" if is_recording else "开始记录"
+        btn_text = t("停止记录") if is_recording else t("开始记录")
         rec_btn = ttk.Button(main, text=btn_text)
         rec_btn.pack(fill=tk.X, pady=4)
 
-        file_info = f"文件: {os.path.basename(self.log_file_path)}" if is_recording else "未记录"
+        file_info = t("文件: {name}").format(
+            name=os.path.basename(self.log_file_path)) if is_recording else t("未记录")
         status_lbl = ttk.Label(main, text=file_info)
         status_lbl.pack(fill=tk.X, pady=4)
 
         def toggle():
             self.toggle_log()
             is_rec = self.log_file is not None
-            rec_btn.configure(text="停止记录" if is_rec else "开始记录")
+            rec_btn.configure(text=t("停止记录") if is_rec else t("开始记录"))
             status_lbl.configure(
-                text=f"文件: {os.path.basename(self.log_file_path)}" if is_rec else "未记录")
+                text=t("文件: {name}").format(
+                    name=os.path.basename(self.log_file_path)) if is_rec else t("未记录"))
 
         rec_btn.configure(command=toggle)
 
-        ttk.Button(main, text="确定", command=dialog.destroy).pack(side=tk.RIGHT, pady=(10, 0))
+        ttk.Button(main, text=t("确定"), command=dialog.destroy).pack(side=tk.RIGHT, pady=(10, 0))
 
         self.root.wait_window(dialog)
-
-    def show_help(self):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("使用说明")
-        dialog.geometry("700x500")
-        dialog.transient(self.root)
-
-        text = self._create_scrolled_text(dialog)
-        text.configure(state=tk.NORMAL, wrap=tk.WORD,
-                       font=('Microsoft YaHei', 10))
-
-        help_content = """HSS串口助手 - 使用说明
-
-1. 功能概述
-  - 串口参数配置和连接管理
-  - 数据发送（支持字符串和Hex模式）
-  - 数据接收（支持字符串和Hex模式，带选项卡切换）
-  - 多页面多命令发送
-  - 自动应答
-  - 实时波形显示
-  - 自动重连功能
-  - 数据记录和导出
-  - 主题切换（ttkbootstrap 内置主题）
-
-2. 操作步骤
-
-  2.1 串口连接
-    1. 在顶部"串口控制"栏选择串口、波特率、校验位
-    2. 点击"连接"按钮；更多参数（数据位/停止位/流控）点"更多设置"
-    3. 自动重连可在"设置 > 自动重连设置"中开启
-
-  2.2 发送数据
-    1. 在发送区选择"字符串"或"Hex"选项卡
-    2. 输入数据
-    3. 点击"发送"按钮（或按 Ctrl+Enter 发送、Enter 换行）
-
-  2.3 多命令发送
-    1. 右侧"多命令发送"面板，可新增/重命名/删除页面
-    2. 点"添加命令"录入 模式/标签/内容
-    3. 双击命令 = 立即发送；单击 = 填入发送框
-    4. 右键命令可编辑或删除
-
-  2.4 接收数据
-    1. 数据会在接收区自动显示
-    2. 可切换"字符串"或"HEX"选项卡
-    3. 勾选"时间戳"/"方向"/"回显"控制显示
-
-  2.5 波形显示
-    在菜单"扩展" > "波形显示"中打开
-
-  2.6 数据记录与导出
-    1. 在菜单"数据" > "数据记录"中开始/停止记录（CSV）
-    2. 在菜单"数据" > "导出数据"中导出为 txt/csv/bin
-
-3. 快捷键
-  Ctrl+Enter：发送数据
-  Enter：在发送区换行
-"""
-        text.insert('1.0', help_content)
-        text.configure(state=tk.DISABLED)
 
     # ==================== 设置保存/加载 ====================
 
@@ -2535,6 +2724,7 @@ class MainWindow:
             'frame_header_content': self.frame_header_content_var.get(),
             'frame_footer_content': self.frame_footer_content_var.get(),
             'frame_hex': self.frame_hex_var.get(),
+            'language': get_language(),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -2581,13 +2771,15 @@ class MainWindow:
         self.frame_footer_content_var.set(s.get('frame_footer_content', ''))
         self.frame_hex_var.set(s.get('frame_hex', False))
 
-        # 历史面板宽度
+        # 右侧面板宽度（sashpos 是分割线 x 坐标，需换算：位置 = 总宽 - 面板宽）
         hist_width = s.get('hist_panel_width', 220)
-        if hasattr(self, 'hist_frame'):
-            self.hist_frame.configure(width=hist_width)
+        if hasattr(self, 'content_pw') and hasattr(self, 'hist_frame'):
+            hist_width = max(100, min(800, hist_width))
             self.hist_panel_width = hist_width
             if hasattr(self, 'hist_width_var'):
                 self.hist_width_var.set(hist_width)
+            # 启动时窗口未完成布局，_set_right_panel_width 内部会延迟重试
+            self._set_right_panel_width(hist_width)
 
         # 发送框内容
         self.string_input.delete('1.0', tk.END)
@@ -2606,15 +2798,17 @@ class MainWindow:
         self._on_send_tab_changed(None)
 
         # 主题
-        theme = s.get('theme', 'cosmo')
+        theme = s.get('theme', 'bootstrap-light')
         if theme in get_themes():
             self.set_theme(theme)
 
     # ==================== 工具方法 ====================
 
     def update_counts(self):
-        self.recv_count_label.configure(text=f"接收: {self.recv_bytes} 字节")
-        self.send_count_label.configure(text=f"发送: {self.sent_bytes} 字节")
+        self.recv_count_label.configure(
+            text=t("接收: {n} 字节").format(n=self.recv_bytes))
+        self.send_count_label.configure(
+            text=t("发送: {n} 字节").format(n=self.sent_bytes))
 
     def _create_scrolled_text(self, parent):
         """创建带滚动条的只读 Text 控件"""

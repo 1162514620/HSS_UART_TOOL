@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) if not getattr(
 
 
 def main():
-    root = ttkb.Window(themename="cosmo")
+    root = ttkb.Window(themename="bootstrap-light")
     root.title("HSS串口助手")
     root.geometry("1250x900")
 
