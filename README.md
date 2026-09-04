@@ -1,6 +1,10 @@
-# 多功能串口助手 (MultiSerial Tool)
+# HSS 串口助手 (HSS Serial Tool)
 
-一款跨平台（Windows/Mac/Linux）、功能强大、体验优秀的串口调试助手，满足嵌入式开发的所有核心需求。
+一款跨平台（Windows/Mac/Linux）、功能强大、体验优秀的串口调试助手，满足嵌入式开发的核心需求。
+
+![Python](https://img.shields.io/badge/Python-3.8+-blue)
+![UI](https://img.shields.io/badge/UI-ttkbootstrap-informational)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ## 功能特性
 
@@ -10,36 +14,30 @@
 - **数据发送**：Hex/字符串双模式，手动发送，循环发送，发送历史记录
 
 ### 进阶功能
+- **多页面命令**：命令分组管理，多页面切换，一键发送常用指令
+- **自动应答**：基于规则匹配的收到即回复，支持编辑/删除规则
 - **波形显示**：基于matplotlib的波形窗口，支持16/32位整数解析，大端/小端字节序，波形缩放平移，PNG保存
 - **数据记录与导出**：实时日志记录，自动文件分割，支持TXT/CSV/Bin导出
 - **自动重连**：串口断开后自动尝试重连，可设置间隔和最大次数
 
 ### 体验优化
-- **主题切换**：支持18种ttkbootstrap主题（深色/浅色），实时切换，自动保存设置
+- **中英文切换**：菜单栏"语言"实时切换界面语言，自动保存设置
+- **主题切换**：内置30种ttkbootstrap主题（15深色 + 15浅色），实时切换，自动保存设置
 - **配置保存**：使用JSON保存所有配置，下次启动自动恢复
-- **帮助文档**：内置"快速入门"帮助文档
 
 ## 技术栈
 
-- **编程语言**：Python 3.7+
+- **编程语言**：Python 3.8+
 - **UI框架**：ttkbootstrap（基于tkinter的现代化主题库）
 - **串口通信**：pyserial
-- **波形显示**：matplotlib（可选）
+- **波形显示**：matplotlib
 - **其他**：numpy, chardet
-
-## 可用主题
-
-### 深色主题
-- darkly, superhero, solar, cyborg, vapor
-
-### 浅色主题
-- cosmo, flatly, litera, minty, lumen, sandstone, yeti, pulse, united, morph, journal, simplex, cerculean
 
 ## 安装步骤
 
 ### 1. 安装Python
 
-确保安装了Python 3.7或更高版本：
+确保安装了Python 3.8或更高版本：
 
 ```bash
 python --version
@@ -49,7 +47,7 @@ python --version
 
 ```bash
 git clone <repository_url>
-cd HSS
+cd HSS串口助手
 ```
 
 ### 3. 安装依赖
@@ -75,8 +73,7 @@ run.bat
 ### 基本操作
 
 1. **串口连接**：
-   - 在菜单栏点击"串口设置"
-   - 选择串口，设置波特率、数据位、停止位、校验位
+   - 在顶部串口栏选择串口，设置波特率、数据位、停止位、校验位
    - 点击"连接"按钮
 
 2. **发送数据**：
@@ -86,29 +83,33 @@ run.bat
 
 3. **接收数据**：
    - 数据会在接收区显示
-   - 支持实时波形显示（菜单"系统" > "波形显示"）
+   - 支持实时波形显示（菜单"扩展" > "波形显示"）
 
 ### 高级功能
 
-1. **自动重连**：
-   - 菜单"系统" > "自动重连设置"
+1. **命令页面**：
+   - 右侧命令面板支持多页面管理
+   - 添加/删除/重命名页面，双击命令即可发送
+
+2. **自动应答**：
+   - 右键应答规则列表，编辑/删除规则
+   - 收到匹配数据自动回复
+
+3. **自动重连**：
+   - 菜单"设置" > "自动重连设置"
    - 设置重连间隔和最大次数
-   - 串口断开后会自动尝试重连
 
-2. **数据记录**：
-   - 菜单"系统" > "数据记录"
-   - 数据会自动保存到logs目录
-   - 文件超过10MB时自动分割
+4. **数据记录**：
+   - 菜单"数据" > "数据记录"
+   - 数据会自动保存到logs目录，文件超过阈值自动分割
 
-3. **数据导出**：
-   - 菜单"文件" > "导出数据"
-   - 选择导出格式（TXT/CSV/Bin）
-   - 选择保存路径
+5. **数据导出**：
+   - 菜单"数据" > "导出数据"
+   - 支持TXT/CSV/Bin格式
 
-4. **主题切换**：
-   - 菜单"系统" > "主题"
-   - 支持18种ttkbootstrap主题
-   - 深色主题和浅色主题分类显示
+6. **主题与语言**：
+   - 菜单"主题"：30种内置主题，深色/浅色分类显示
+   - 菜单"语言"：中文/English实时切换
 
 ### 快捷键
 
@@ -118,18 +119,29 @@ run.bat
 ## 项目结构
 
 ```
-HSS/
+HSS串口助手/
 ├── main.py              # 程序入口
 ├── main_window.py       # 主窗口UI
 ├── serial_manager.py    # 串口管理
 ├── receive_thread.py    # 接收线程
 ├── command_manager.py   # 命令管理
+├── i18n.py              # 中英文国际化
 ├── styles.py            # 样式和主题
 ├── requirements.txt     # 依赖列表
-├── setup.py             # 安装配置
+├── HSS.spec             # PyInstaller打包配置
 ├── run.bat              # 启动脚本
 └── README.md            # 说明文档
 ```
+
+## 打包发布
+
+使用 PyInstaller 打包为单个可执行文件：
+
+```bash
+pyinstaller HSS.spec
+```
+
+产物位于 `dist/` 目录。
 
 ## 注意事项
 
