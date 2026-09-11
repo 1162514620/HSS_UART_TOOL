@@ -81,6 +81,7 @@ _NAME_MAP = {
     'recv': 'info', 'send': 'success', 'error': 'danger',
     'timestamp': 'warning', 'success': 'success', 'info': 'info',
     'text': 'fg', 'bg_input': 'inputbg', 'select_bg': 'selectbg',
+    'select_fg': 'selectfg',
     'border': 'border', 'background': 'bg', 'accent': 'primary',
 }
 

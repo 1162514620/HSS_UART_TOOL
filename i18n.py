@@ -42,6 +42,7 @@ _EN = {
     '时间戳': 'Timestamp',
     '方向': 'Direction',
     '回显': 'Echo',
+    '自动换行': 'Auto Wrap',
     '超时:': 'Timeout:',
     'ms(0=自动)': 'ms (0=auto)',
 
@@ -71,8 +72,10 @@ _EN = {
     '页面:': 'Page:',
     '重命名': 'Rename',
     '添加命令': 'Add Command',
-    '清空当前': 'Clear Page',
-    '宽度:': 'Width:',
+    '命令内容(双击注释)': 'Command (Dbl-click: note)',
+    '发送按钮': 'Send',
+    '页面宽度:': 'Page Width:',
+    '按钮宽度:': 'Button Width:',
     '应用': 'Apply',
 
     # ── 自动应答 ──
@@ -103,15 +106,9 @@ _EN = {
     '页面名称已存在': 'Page name already exists',
     '至少需要保留一个页面': 'At least one page is required',
     '确定删除页面「{page_name}」及其所有命令？': 'Delete page "{page_name}" and all its commands?',
-    '编辑命令': 'Edit Command',
-    '删除命令': 'Delete Command',
-    '模式:': 'Mode:',
-    '标签:': 'Label:',
-    '内容:': 'Content:',
+    '修改按钮文本': 'Edit Button Text',
+    '请输入按钮显示文本：': 'Enter button display text:',
     '非法字符: {chars}': 'Invalid characters: {chars}',
-    'Hex 长度必须为偶数': 'Hex length must be even',
-    '内容不能为空': 'Content cannot be empty',
-    'Hex 格式错误': 'Invalid hex format',
     'Hex数据长度必须为偶数': 'Hex data length must be even',
 
     # ── 状态栏 / 消息 ──

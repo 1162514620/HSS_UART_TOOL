@@ -43,6 +43,10 @@ class ReceiveThread(threading.Thread):
                 except Exception as e:
                     if self.on_error and self.running:
                         self.on_error(str(e))
+                else:
+                    # 已连接但无数据时休眠，避免空转占用 CPU
+                    if not data:
+                        time.sleep(0.01)
             else:
                 # 未连接时减少 CPU 占用
                 time.sleep(0.1)

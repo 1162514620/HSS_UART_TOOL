@@ -95,14 +95,6 @@ class CommandManager:
         cmds.insert(index, dict(item))
         self.save_commands()
 
-    def clear_commands(self, page: str = None) -> None:
-        """清空指定页面的所有命令"""
-        self._ensure_default_page()
-        if page is None or page not in self.pages:
-            page = self.page_order[0]
-        self.pages[page].clear()
-        self.save_commands()
-
     # ==================== 查询 ====================
 
     def get_command_display_list(self, page: str = None) -> List[str]:

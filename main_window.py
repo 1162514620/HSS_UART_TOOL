@@ -118,6 +118,7 @@ class MainWindow:
         self.echo_var = tk.BooleanVar(value=True)
         self.auto_escape_var = tk.BooleanVar(value=False)
         self.crlf_var = tk.BooleanVar(value=False)
+        self.auto_wrap_var = tk.BooleanVar(value=False)
         self.loop_var = tk.BooleanVar(value=False)
         self.loop_interval_var = tk.IntVar(value=1000)
         self.loop_count_var = tk.IntVar(value=0)
@@ -145,6 +146,8 @@ class MainWindow:
 
         self.init_ui()
         self.refresh_ports_ui()
+        # 窗口显示后再自动扫描一次串口（部分USB转串口设备枚举较慢）
+        self.root.after(300, self.refresh_ports_ui)
         self.start_port_scan()
 
     def init_ui(self):
@@ -285,8 +288,11 @@ class MainWindow:
         self.last_ports = ports
         values = [f"{n} - {d}" for n, d in ports]
         self.port_combo['values'] = values
-        if values and not self.port_var.get():
+        # 当前选中端口不在新列表中时，改选第一个可用端口
+        if values and self.port_var.get() not in values:
             self.port_combo.current(0)
+        elif not values:
+            self.port_var.set('')
 
     # ==================== 主内容区 ====================
 
@@ -355,6 +361,8 @@ class MainWindow:
             side=tk.LEFT, padx=2)
         ttk.Checkbutton(toolbar, text=t("回显"), variable=self.echo_var).pack(
             side=tk.LEFT, padx=2)
+        ttk.Checkbutton(toolbar, text=t("自动换行"), variable=self.auto_wrap_var,
+                        command=self._toggle_auto_wrap).pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=6)
@@ -476,6 +484,8 @@ class MainWindow:
         # 语言切换重建 UI 时保留用户设置的宽度
         if not hasattr(self, 'hist_panel_width'):
             self.hist_panel_width = 220
+        # 命令行选中高亮样式（依赖主题色板，重建/换主题时重新配置）
+        self._config_cmd_selection_style()
         self.hist_frame = ttk.LabelFrame(parent, text=t("功能面板"))
         parent.add(self.hist_frame)
         self.hist_frame.configure(width=self.hist_panel_width)
@@ -522,26 +532,27 @@ class MainWindow:
         self.page_content = ttk.Frame(cmd_tab)
         self.page_content.pack(fill=tk.BOTH, expand=True, padx=2)
 
-        self.hist_listboxes: dict = {}   # page_name -> Treeview
-        self._page_frames: dict = {}     # page_name -> content Frame（含 Treeview）
+        self.command_widgets: dict = {}   # page_name -> list of {'entry': Entry, 'btn': Button, 'frame': Frame}
+        self.command_canvases: dict = {}  # page_name -> Canvas
+        self._cmd_frames: dict = {}      # page_name -> Canvas 内命令行容器 Frame
+        self._page_frames: dict = {}     # page_name -> content Frame
+        self._mousewheel_funcs: dict = {} # page_name -> 鼠标滚轮函数
+        self._cmd_send_headers: dict = {} # page_name -> "发送按钮"表头标签（随按钮宽度同步）
         self._current_page_idx = 0
-        self._cmd_clipboard = None       # 命令剪切板（Ctrl+X/Ctrl+V 重排用）
+        self._selected_cmd_index = None  # 当前选中的命令索引
+        self._cmd_clipboard = None       # 命令剪切板（右键复制/剪切/粘贴用）
 
         for page_name in self.command_manager.get_pages():
             self._add_command_tab(page_name)
         if self.command_manager.get_pages():
             self._switch_to_page(0)
 
-        # 底部按钮：仅保留命令操作
+        # 底部按钮：添加命令（直接在末尾追加空命令行）
         cmd_bottom = ttk.Frame(cmd_tab)
         cmd_bottom.pack(fill=tk.X, padx=2, pady=(0, 2))
 
         ttk.Button(cmd_bottom, text=t("添加命令"),
-                   command=self._add_command_to_current_page).pack(
-                       side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        ttk.Button(cmd_bottom, text=t("清空当前"),
-                   command=self.clear_commands).pack(
-                       side=tk.LEFT, fill=tk.X, expand=True)
+                   command=self._add_command_to_current_page).pack(fill=tk.X)
 
         # === 自动应答 Tab ===
         self._create_auto_reply_tab()
@@ -551,12 +562,19 @@ class MainWindow:
         bottom.pack(fill=tk.X, padx=4, pady=(0, 4))
         width_row = ttk.Frame(bottom)
         width_row.pack(fill=tk.X)
-        ttk.Label(width_row, text=t("宽度:")).pack(side=tk.LEFT)
+        # 页面宽度
+        ttk.Label(width_row, text=t("页面宽度:")).pack(side=tk.LEFT)
         self.hist_width_var = tk.IntVar(value=self.hist_panel_width)
         ttk.Spinbox(width_row, from_=100, to=500, textvariable=self.hist_width_var,
-                    width=5, command=self._apply_hist_width).pack(side=tk.LEFT, padx=2)
+                    width=5).pack(side=tk.LEFT, padx=2)
+        # 按钮宽度
+        ttk.Label(width_row, text=t("按钮宽度:")).pack(side=tk.LEFT, padx=(8, 0))
+        self.cmd_btn_width_var = tk.IntVar(value=4)
+        ttk.Spinbox(width_row, from_=2, to=999, textvariable=self.cmd_btn_width_var,
+                    width=4).pack(side=tk.LEFT, padx=2)
+        # 应用按钮（两者共用）
         ttk.Button(width_row, text=t("应用"), width=4,
-                   command=self._apply_hist_width).pack(side=tk.LEFT)
+                   command=self._apply_cmd_panel_widths).pack(side=tk.LEFT, padx=(4, 0))
 
     def _create_auto_reply_tab(self):
         """创建自动应答 Tab"""
@@ -763,35 +781,372 @@ class MainWindow:
                         values=(status, mode, trigger, reply))
 
     def _add_command_tab(self, page_name: str):
-        """创建一个命令页面（Frame + Treeview + scrollbar，存入 dict）"""
+        """创建一个命令页面（文本框+发送按钮布局，存入 dict）"""
         container = ttk.Frame(self.page_content)
 
+        # 带滚动条的命令容器
         scroll = ttk.Scrollbar(container, orient=tk.VERTICAL)
-        # show='tree' 只显示 #0 列、无表头；iid=str(index) 便于按索引定位
-        tree = ttk.Treeview(container, yscrollcommand=scroll.set,
-                            selectmode='browse', show='tree')
-        scroll.configure(command=tree.yview)
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Canvas 为经典 Tk 控件，不随 ttk 主题，需手动指定主题色背景
+        canvas = tk.Canvas(container, highlightthickness=0,
+                           bg=get_color('bg_input'))
+        scroll.configure(command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+
+        # 表头行：标注各列用途（与命令行列对齐）
+        header = ttk.Frame(container)
+        header.pack(fill=tk.X, padx=2, pady=(0, 1))
+        ttk.Label(header, text='', width=3, anchor='center').pack(side=tk.LEFT)
+        ttk.Label(header, text='HEX', anchor='center').pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Label(header, text=t('命令内容(双击注释)'), anchor='w').pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        # 右侧占位宽度同步滚动条实际宽度，使"发送按钮"表头与按钮列对齐
+        spacer = ttk.Frame(header, width=13)
+        spacer.pack(side=tk.RIGHT)
+        send_hdr = ttk.Label(header, text=t('发送按钮'), anchor='center')
+        send_hdr.pack(side=tk.RIGHT)
+        self._cmd_send_headers[page_name] = send_hdr
+
+        def _sync_spacer(_event=None):
+            w = scroll.winfo_width()
+            if w > 10:
+                spacer.configure(width=w)
+        container.bind('<Configure>', _sync_spacer, add='+')
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 填充数据
-        for i, item in enumerate(self.command_manager.get_command_display_list(page_name)):
-            tree.insert('', 'end', iid=str(i), text=item)
+        # 命令行容器
+        cmd_frame = ttk.Frame(canvas)
+        canvas_window = canvas.create_window((0, 0), window=cmd_frame, anchor='nw')
 
-        # 绑定事件
-        tree.bind('<Double-Button-1>', self.on_command_double_click)
-        tree.bind('<Button-1>', self.on_command_single_click)
-        tree.bind('<Button-3>', self.show_command_context_menu)
-        # Ctrl+X 剪切 / Ctrl+V 粘贴（重排命令，同时绑定大小写两种键序）
-        for key, cb in (('<Control-x>', self._on_command_cut),
-                        ('<Control-X>', self._on_command_cut),
-                        ('<Control-v>', self._on_command_paste),
-                        ('<Control-V>', self._on_command_paste)):
-            tree.bind(key, cb)
-        tree._page_name = page_name  # 事件回调中反查
+        # 绑定滚动和调整大小事件
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # 内容不足时禁止滚动到空白区域
+            region = canvas.bbox('all')
+            if region:
+                content_height = region[3] - region[1]
+                canvas_height = canvas.winfo_height()
+                if content_height < canvas_height:
+                    canvas.yview_moveto(0)
 
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+            # 内容不足时禁止滚动到空白区域
+            region = canvas.bbox('all')
+            if region:
+                content_height = region[3] - region[1]
+                canvas_height = event.height
+                if content_height < canvas_height:
+                    canvas.yview_moveto(0)
+
+        cmd_frame.bind('<Configure>', on_frame_configure)
+        canvas.bind('<Configure>', on_canvas_configure)
+
+        # 鼠标滚轮函数（需要绑定到所有子控件）
+        def on_mousewheel(event):
+            # 内容不足时禁止滚动
+            widgets = self.command_widgets.get(page_name, [])
+            if not widgets:
+                return 'break'
+            region = canvas.bbox('all')
+            if region:
+                content_height = region[3] - region[1]
+                canvas_height = canvas.winfo_height()
+                if content_height < canvas_height:
+                    canvas.yview_moveto(0)
+                    return 'break'
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        # 绑定到 Canvas 和命令容器
+        canvas.bind('<MouseWheel>', on_mousewheel)
+        cmd_frame.bind('<MouseWheel>', on_mousewheel)
+
+        # 存储滚轮函数（_add_command_row 需要用到）
+        self._mousewheel_funcs[page_name] = on_mousewheel
+
+        # 存储每页的命令控件（必须先注册，_add_command_row 依赖这些条目）
+        self.command_widgets[page_name] = []
         self._page_frames[page_name] = container
-        self.hist_listboxes[page_name] = tree
+        self.command_canvases[page_name] = canvas
+        self._cmd_frames[page_name] = cmd_frame
+
+        # 填充数据
+        commands = self.command_manager.get_full_commands(page_name)
+        for i, item in enumerate(commands):
+            self._add_command_row(page_name, i, item)
+
+    def _add_command_row(self, page_name: str, index: int, item: dict):
+        """为单条命令创建一行（文本框+发送按钮）"""
+        widgets = self.command_widgets.get(page_name)
+        if widgets is None:
+            return
+
+        cmd_frame = self._cmd_frames.get(page_name)
+        if not cmd_frame:
+            return
+
+        # 创建命令行 Frame
+        row_frame = ttk.Frame(cmd_frame)
+        row_frame.pack(fill=tk.X, padx=2, pady=1)
+
+        # 最左侧：命令选择标签（点击选中整行：选择标签+文本框+发送按钮高亮）
+        # fill=Y 使标签高度与 Entry/Button 一致，选中高亮时不会出现高度差
+        sel_label = ttk.Label(row_frame, text='○', width=3, anchor='center',
+                              cursor='hand2')
+        sel_label.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 3))
+        sel_label.bind('<Button-1>',
+                       lambda event, p=page_name, idx=index:
+                           self._select_row_click(p, idx) or 'break')
+
+        # HEX 勾选框：勾选=HEX 命令，未勾选=字符串命令（新命令默认字符串）
+        mode = item.get('mode', 'string')
+        mode_var = tk.BooleanVar(value=(mode == 'hex'))
+        mode_check = ttk.Checkbutton(
+            row_frame, variable=mode_var,
+            command=lambda p=page_name, idx=index, v=mode_var:
+                self._update_command_mode(p, idx, 'hex' if v.get() else 'string'))
+        mode_check.pack(side=tk.LEFT, padx=(0, 2))
+
+        # 文本框（显示命令内容）
+        content = item.get('content', '')
+        entry = ttk.Entry(row_frame, font=('Consolas', 9))
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        entry.insert(0, content)
+
+        # 发送按钮（默认显示命令序号）
+        label = item.get('label', '')
+        btn_text = label if label else str(index + 1)
+        btn = ttk.Button(row_frame, text=btn_text, width=4,
+                         command=lambda idx=index: self._send_command_at_index(page_name, idx))
+        btn.pack(side=tk.RIGHT)
+
+        # 文本框修改后自动保存
+        def on_entry_change(event, idx=index, e=entry, p=page_name):
+            new_content = e.get()
+            self._update_command_content(p, idx, new_content)
+
+        entry.bind('<FocusOut>', on_entry_change)
+        entry.bind('<Return>', on_entry_change)
+
+        # 双击文本框：修改对应发送按钮的文本内容
+        def on_entry_double_click(event, idx=index, b=btn, p=page_name):
+            new_label = simpledialog.askstring(
+                t("修改按钮文本"), t("请输入按钮显示文本："),
+                initialvalue=b.cget('text'), parent=self.root)
+            if new_label is not None:
+                new_label = new_label.strip()
+                # 空文本恢复为命令序号
+                b.configure(text=new_label if new_label else str(idx + 1))
+                self._update_command_label(p, idx, new_label)
+            return 'break'
+
+        entry.bind('<Double-Button-1>', on_entry_double_click)
+
+        # 左键：进入编辑模式，清除行选中状态（恢复样式与光标）
+        def on_entry_left_click(event, p=page_name):
+            self._set_selected_row(p, None)
+            return None  # 放行默认处理（聚焦、光标定位）
+
+        entry.bind('<Button-1>', on_entry_left_click)
+
+        # 判定是否处于"命令级操作"状态：该行被标签点击选中 且 文本框无选中文本
+        def _cmd_op_active(idx=index, e=entry):
+            if self._selected_cmd_index != idx:
+                return False
+            try:
+                e.index('sel.first')
+                return False  # 有选中文本 -> 按文本编辑处理
+            except tk.TclError:
+                return True
+
+        def on_copy(event, idx=index, e=entry, p=page_name):
+            if _cmd_op_active(idx, e):
+                self._copy_command_at_index(p, idx)
+                return 'break'
+            return None
+
+        def on_cut(event, idx=index, e=entry, p=page_name):
+            if _cmd_op_active(idx, e):
+                self._cut_command_at_index(p, idx)
+                return 'break'
+            return None
+
+        def on_paste(event, idx=index, e=entry, p=page_name):
+            if _cmd_op_active(idx, e) and self._cmd_clipboard:
+                self._paste_command_at_index(p, idx)
+                return 'break'
+            return None  # 命令剪贴板为空 -> 正常文本粘贴
+
+        def on_delete_key(event, idx=index, e=entry, p=page_name):
+            if _cmd_op_active(idx, e):
+                self._delete_command_at_index(p, idx)
+                return 'break'
+            return None  # 正常文本删除
+
+        for seq, cb in (('<Control-c>', on_copy), ('<Control-C>', on_copy),
+                        ('<Control-x>', on_cut), ('<Control-X>', on_cut),
+                        ('<Control-v>', on_paste), ('<Control-V>', on_paste),
+                        ('<Delete>', on_delete_key)):
+            entry.bind(seq, cb)
+
+        # 绑定鼠标滚轮到每行的子控件（解决焦点在Entry时滚轮失效问题）
+        mousewheel_func = self._mousewheel_funcs.get(page_name)
+        if mousewheel_func:
+            entry.bind('<MouseWheel>', mousewheel_func)
+            btn.bind('<MouseWheel>', mousewheel_func)
+            sel_label.bind('<MouseWheel>', mousewheel_func)
+            mode_check.bind('<MouseWheel>', mousewheel_func)
+            row_frame.bind('<MouseWheel>', mousewheel_func)
+
+        # 存储控件引用
+        widgets.append({
+            'frame': row_frame,
+            'sel_label': sel_label,
+            'mode_check': mode_check,
+            'entry': entry,
+            'btn': btn,
+            'index': index
+        })
+
+    def _send_command_at_index(self, page_name: str, index: int):
+        """发送指定索引的命令"""
+        commands = self.command_manager.get_full_commands(page_name)
+        if 0 <= index < len(commands):
+            self._load_command_to_send_input(commands[index])
+            self.send_data()
+
+    def _update_command_content(self, page_name: str, index: int, new_content: str):
+        """更新命令内容"""
+        commands = self.command_manager.get_full_commands(page_name)
+        if 0 <= index < len(commands):
+            self.command_manager.update_command(
+                page_name, index, new_content,
+                commands[index].get('mode', 'string'),
+                commands[index].get('label', ''))
+
+    def _update_command_label(self, page_name: str, index: int, new_label: str):
+        """更新命令标签（按钮文本）"""
+        commands = self.command_manager.get_full_commands(page_name)
+        if 0 <= index < len(commands):
+            self.command_manager.update_command(
+                page_name, index,
+                commands[index].get('content', ''),
+                commands[index].get('mode', 'string'),
+                new_label)
+
+    def _update_command_mode(self, page_name: str, index: int, mode: str):
+        """更新命令模式（勾选框：勾选=HEX，未勾选=字符串）"""
+        commands = self.command_manager.get_full_commands(page_name)
+        if 0 <= index < len(commands):
+            self.command_manager.update_command(
+                page_name, index,
+                commands[index].get('content', ''),
+                mode,
+                commands[index].get('label', ''))
+
+    def _select_row_click(self, page_name: str, index: int):
+        """点击选择标签：选中整行（高亮），焦点给文本框以便使用快捷键"""
+        self._set_selected_row(page_name, index)
+        widgets = self.command_widgets.get(page_name, [])
+        if 0 <= index < len(widgets):
+            widgets[index]['entry'].focus_set()
+
+    def _delete_command_at_index(self, page_name: str, index: int):
+        """删除指定索引的命令"""
+        self.command_manager.remove_command(page_name, index)
+        self._rebuild_command_page(page_name)
+
+    def _config_cmd_selection_style(self):
+        """配置命令行样式（初始化和主题切换时调用）"""
+        style = ttk.Style()
+        # 选中样式：选择标签+文本框+发送按钮高亮；光标色=输入框背景色（视觉隐形），
+        # 避免与行选中状态混淆
+        style.configure('CmdSelected.TLabel',
+                        background=get_color('select_bg'),
+                        foreground=get_color('select_fg'),
+                        anchor='center')
+        style.configure('CmdSelected.TEntry',
+                        fieldbackground=get_color('select_bg'),
+                        foreground=get_color('select_fg'),
+                        insertbackground=get_color('bg_input'))
+        style.configure('CmdSelected.TButton',
+                        background=get_color('select_bg'),
+                        foreground=get_color('select_fg'))
+
+    def _set_selected_row(self, page_name: str, index):
+        """设置选中的命令行（选择标签+文本框+发送按钮高亮）；index 为 None 时清除选中"""
+        # 先恢复该页所有行的默认样式
+        for w in self.command_widgets.get(page_name, []):
+            w['sel_label'].configure(text='○', style='TLabel')
+            w['entry'].configure(style='TEntry')
+            w['btn'].configure(style='TButton')
+        if index is None:
+            self._selected_cmd_index = None
+            return
+        widgets = self.command_widgets.get(page_name, [])
+        if 0 <= index < len(widgets):
+            widgets[index]['sel_label'].configure(text='●', style='CmdSelected.TLabel')
+            widgets[index]['entry'].configure(style='CmdSelected.TEntry')
+            widgets[index]['btn'].configure(style='CmdSelected.TButton')
+            self._selected_cmd_index = index
+
+    def _copy_command_at_index(self, page_name: str, index: int):
+        """复制指定索引的命令到内部剪贴板"""
+        commands = self.command_manager.get_full_commands(page_name)
+        if 0 <= index < len(commands):
+            self._cmd_clipboard = dict(commands[index])
+
+    def _cut_command_at_index(self, page_name: str, index: int):
+        """剪切指定索引的命令到内部剪贴板"""
+        commands = self.command_manager.get_full_commands(page_name)
+        if 0 <= index < len(commands):
+            self._cmd_clipboard = dict(commands[index])
+            self.command_manager.remove_command(page_name, index)
+            self._rebuild_command_page(page_name)
+
+    def _paste_command_at_index(self, page_name: str, index: int):
+        """将内部剪贴板命令粘贴到指定行的下一行（未选中则追加末尾）"""
+        if not self._cmd_clipboard:
+            return
+        commands = self.command_manager.get_full_commands(page_name)
+        insert_at = index + 1 if 0 <= index < len(commands) else len(commands)
+        self.command_manager.insert_command(page_name, insert_at, self._cmd_clipboard)
+        self._rebuild_command_page(page_name)
+
+    def _rebuild_command_page(self, page_name: str):
+        """重建指定页面的命令列表"""
+        widgets = self.command_widgets.get(page_name, [])
+        for w in widgets:
+            w['frame'].destroy()
+        self.command_widgets[page_name] = []
+        self._selected_cmd_index = None
+
+        # 强制更新 frame 的几何信息
+        cmd_frame = self._cmd_frames.get(page_name)
+        if cmd_frame:
+            cmd_frame.update_idletasks()
+
+        commands = self.command_manager.get_full_commands(page_name)
+        for i, item in enumerate(commands):
+            self._add_command_row(page_name, i, item)
+
+        # 强制更新 canvas 的 scrollregion 和滚动位置
+        canvas = self.command_canvases.get(page_name)
+        if canvas:
+            canvas.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # 内容为空时重置滚动位置
+            if not commands:
+                canvas.yview_moveto(0)
+            else:
+                # 内容不足时禁止滚动到空白区域
+                region = canvas.bbox('all')
+                if region:
+                    content_height = region[3] - region[1]
+                    canvas_height = canvas.winfo_height()
+                    if content_height < canvas_height:
+                        canvas.yview_moveto(0)
 
     def _switch_to_page(self, idx: int):
         """按索引切页：Combobox 同步 + 叠放对应 Frame"""
@@ -839,14 +1194,22 @@ class MainWindow:
         if not self.command_manager.rename_page(old_name, new_name):
             messagebox.showwarning(t("提示"), t("页面名称已存在或无效"))
             return
-        # 更新 UI：Combobox 值 + 字典 key（注意：Treeview 里挂的 _page_name 也要同步）
-        tree = self.hist_listboxes.pop(old_name, None)
+        # 更新 UI：Combobox 值 + 字典 key
+        widgets = self.command_widgets.pop(old_name, None)
+        canvas = self.command_canvases.pop(old_name, None)
+        cmd_frame = self._cmd_frames.pop(old_name, None)
         frame = self._page_frames.pop(old_name, None)
-        if tree is not None:
-            tree._page_name = new_name
-            self.hist_listboxes[new_name] = tree
+        mousewheel_func = self._mousewheel_funcs.pop(old_name, None)
+        if widgets is not None:
+            self.command_widgets[new_name] = widgets
+        if canvas is not None:
+            self.command_canvases[new_name] = canvas
+        if cmd_frame is not None:
+            self._cmd_frames[new_name] = cmd_frame
         if frame is not None:
             self._page_frames[new_name] = frame
+        if mousewheel_func is not None:
+            self._mousewheel_funcs[new_name] = mousewheel_func
         pages = self.command_manager.get_pages()
         self.page_selector.configure(values=pages)
         new_idx = pages.index(new_name)
@@ -878,7 +1241,10 @@ class MainWindow:
             return
         cur_idx = self._current_page_idx
         self.command_manager.remove_page(page_name)
-        self.hist_listboxes.pop(page_name, None)
+        self.command_widgets.pop(page_name, None)
+        self.command_canvases.pop(page_name, None)
+        self._cmd_frames.pop(page_name, None)
+        self._mousewheel_funcs.pop(page_name, None)
         frame = self._page_frames.pop(page_name, None)
         if frame is not None:
             frame.pack_forget()
@@ -890,106 +1256,20 @@ class MainWindow:
         self._switch_to_page(cur_idx if cur_idx >= 0 else 0)
 
     def _add_command_to_current_page(self):
-        """打开"添加命令"对话框，添加到当前页面"""
+        """在当前页面末尾直接添加一条空命令行（默认字符串模式，不弹窗）"""
         page = self._get_current_page_name()
-        self._command_dialog(page, edit_idx=None)
-
-    def _command_dialog(self, page: str, edit_idx: int = None):
-        """添加/编辑命令对话框
-
-        Args:
-            page: 目标页面
-            edit_idx: 编辑模式时给定索引；None 为新增
-        """
-        is_edit = edit_idx is not None
-        existing = None
-        if is_edit:
-            cmds = self.command_manager.get_full_commands(page)
-            if edit_idx < 0 or edit_idx >= len(cmds):
-                return
-            existing = cmds[edit_idx]
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title(t("编辑命令") if is_edit else t("添加命令"))
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        frame = ttk.Frame(dialog, padding=10)
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        # 模式
-        ttk.Label(frame, text=t("模式:")).grid(row=0, column=0, sticky='w', pady=4)
-        mode_var = tk.StringVar(value=existing['mode'] if existing else 'string')
-        ttk.Combobox(frame, textvariable=mode_var,
-                     values=['string', 'hex'], width=10,
-                     state='readonly').grid(row=0, column=1, sticky='w', pady=4, padx=4)
-
-        # 标签
-        ttk.Label(frame, text=t("标签:")).grid(row=1, column=0, sticky='w', pady=4)
-        label_var = tk.StringVar(value=(existing or {}).get('label', ''))
-        ttk.Entry(frame, textvariable=label_var, width=30).grid(
-            row=1, column=1, sticky='w', pady=4, padx=4)
-
-        # 内容
-        ttk.Label(frame, text=t("内容:")).grid(row=2, column=0, sticky='nw', pady=4)
-        content_text = tk.Text(frame, width=30, height=4,
-                               font=('Consolas', 10), undo=True)
-        content_text.grid(row=2, column=1, sticky='w', pady=4, padx=4)
-        if existing:
-            content_text.insert('1.0', existing.get('content', ''))
-
-        # Hex 校验提示
-        hint = ttk.Label(frame, text="", foreground=get_color('error'))
-        hint.grid(row=3, column=1, sticky='w', pady=(0, 4), padx=4)
-
-        def validate_hex():
-            if mode_var.get() != 'hex':
-                hint.configure(text="")
-                return True
-            raw = content_text.get('1.0', tk.END).strip()
-            cleaned = raw.replace(' ', '').upper()
-            if not cleaned:
-                hint.configure(text="")
-                return False
-            invalid = set(cleaned) - set('0123456789ABCDEF')
-            if invalid:
-                hint.configure(text=t("非法字符: {chars}").format(
-                    chars=', '.join(sorted(invalid))))
-                return False
-            if len(cleaned) % 2 != 0:
-                hint.configure(text=t("Hex 长度必须为偶数"))
-                return False
-            hint.configure(text="")
-            return True
-
-        content_text.bind('<KeyRelease>', lambda e: validate_hex())
-        mode_var.trace_add('write', lambda *_: validate_hex())
-
-        def on_ok():
-            mode = mode_var.get()
-            content = content_text.get('1.0', tk.END).strip()
-            label = label_var.get().strip()
-            if not content:
-                messagebox.showwarning(t("提示"), t("内容不能为空"), parent=dialog)
-                return
-            if mode == 'hex' and not validate_hex():
-                messagebox.showwarning(t("提示"), t("Hex 格式错误"), parent=dialog)
-                return
-            if is_edit:
-                self.command_manager.update_command(page, edit_idx, content, mode, label)
-            else:
-                self.command_manager.add_command(content, mode, label, page)
-            self._update_current_command_list(page)
-            dialog.destroy()
-
-        btn = ttk.Frame(frame)
-        btn.grid(row=4, column=0, columnspan=2, pady=(8, 0))
-        ttk.Button(btn, text=t("确定"), command=on_ok).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn, text=t("取消"), command=dialog.destroy).pack(side=tk.LEFT, padx=5)
-
-        self._center_dialog(dialog)
-        self.root.wait_window(dialog)
+        if not page:
+            return
+        self.command_manager.add_command('', 'string', '', page)
+        self._rebuild_command_page(page)
+        # 滚动到底部并聚焦新行文本框，方便直接输入
+        canvas = self.command_canvases.get(page)
+        if canvas:
+            canvas.update_idletasks()
+            canvas.yview_moveto(1.0)
+        widgets = self.command_widgets.get(page, [])
+        if widgets:
+            widgets[-1]['entry'].focus_set()
 
     def _apply_hist_width(self):
         """手动宽度输入 → 应用（sashpos 是分割线 x 坐标，需换算：位置 = 总宽 - 面板宽）"""
@@ -1000,6 +1280,26 @@ class MainWindow:
             self._set_right_panel_width(w)
         except Exception:
             pass
+
+    def _apply_cmd_panel_widths(self):
+        """应用页面宽度和按钮宽度"""
+        # 1. 应用页面宽度
+        self._apply_hist_width()
+        # 2. 应用按钮宽度
+        try:
+            btn_width = self.cmd_btn_width_var.get()
+            btn_width = max(2, btn_width)
+            self._update_cmd_btn_width(btn_width)
+        except Exception:
+            pass
+
+    def _update_cmd_btn_width(self, width: int):
+        """更新所有命令行的按钮宽度（含"发送按钮"表头）"""
+        for page_name, widgets in self.command_widgets.items():
+            for w in widgets:
+                w['btn'].configure(width=width)
+        for lbl in getattr(self, '_cmd_send_headers', {}).values():
+            lbl.configure(width=width)
 
     def _set_right_panel_width(self, w):
         """设置右侧面板宽度为 w（实测补偿 sash 开销，保证实际宽度 == 设置值）"""
@@ -1153,6 +1453,7 @@ class MainWindow:
         self._on_send_tab_changed(None)
         self.recv_notebook.select(recv_tab)
         self._set_right_panel_width(self.hist_panel_width)
+        self._toggle_auto_wrap()
 
     def _on_recv_tab_changed(self, event):
         pass
@@ -1545,8 +1846,8 @@ class MainWindow:
                 messagebox.showwarning(t("错误"), t("无效的Hex数据格式！"))
                 return
 
-        # 校验自动添加
-        if self.checksum_enable_var.get():
+        # 校验自动添加（仅 HEX 模式生效，字符串模式不追加校验）
+        if self.checksum_enable_var.get() and self.send_notebook.index('current') != 0:
             data = self._append_checksum(data)
 
         # 帧头帧尾添加（在所有校验、回车换行之后）
@@ -1816,7 +2117,8 @@ class MainWindow:
             except UnicodeEncodeError:
                 return
 
-        if self.checksum_enable_var.get():
+        # 校验仅对 HEX 应答生效
+        if reply_mode == 'hex' and self.checksum_enable_var.get():
             data = self._append_checksum(data)
 
         # 帧头帧尾
@@ -1837,63 +2139,10 @@ class MainWindow:
 
     # ==================== 多命令发送 ====================
 
-    def _update_current_command_list(self, page: str = None):
-        """刷新指定页面的命令列表显示（默认当前页）"""
-        if page is None:
-            page = self._get_current_page_name()
-        tree = self.hist_listboxes.get(page)
-        if not tree:
-            return
-        tree.delete(*tree.get_children())
-        for i, item in enumerate(self.command_manager.get_command_display_list(page)):
-            tree.insert('', 'end', iid=str(i), text=item)
-
     def update_command_lists(self):
         """刷新所有页面的命令列表"""
-        for page_name, tree in self.hist_listboxes.items():
-            tree.delete(*tree.get_children())
-            for i, item in enumerate(self.command_manager.get_command_display_list(page_name)):
-                tree.insert('', 'end', iid=str(i), text=item)
-
-    def on_command_single_click(self, event):
-        """单击命令：填充到发送框（不发送）"""
-        tree = event.widget
-        # 延迟执行以确保先完成选择
-        self.root.after(100, lambda: self._fill_send_from_command(tree))
-
-    def _tree_selected_index(self, tree):
-        """获取 Treeview 当前选中项的整数索引（iid=str(index)）"""
-        sel = tree.selection()
-        if not sel:
-            return None
-        try:
-            return int(sel[0])
-        except (ValueError, IndexError):
-            return None
-
-    def _fill_send_from_command(self, tree):
-        """将选中命令填充到发送框"""
-        idx = self._tree_selected_index(tree)
-        if idx is None:
-            return
-        page = self._get_current_page_name()
-        commands = self.command_manager.get_full_commands(page)
-        if idx >= len(commands):
-            return
-        self._load_command_to_send_input(commands[idx])
-
-    def on_command_double_click(self, event):
-        """双击命令：填入发送框并立即发送"""
-        tree = event.widget
-        idx = self._tree_selected_index(tree)
-        if idx is None:
-            return
-        page = self._get_current_page_name()
-        commands = self.command_manager.get_full_commands(page)
-        if idx >= len(commands):
-            return
-        self._load_command_to_send_input(commands[idx])
-        self.send_data()
+        for page_name in self.command_widgets.keys():
+            self._rebuild_command_page(page_name)
 
     def _load_command_to_send_input(self, item: dict):
         """根据命令 item 切换发送选项卡并填入内容"""
@@ -1908,93 +2157,21 @@ class MainWindow:
             self.hex_input.delete('1.0', tk.END)
             self.hex_input.insert('1.0', content)
 
-    def clear_commands(self):
-        page = self._get_current_page_name()
-        self.command_manager.clear_commands(page)
-        tree = self.hist_listboxes.get(page)
-        if tree:
-            tree.delete(*tree.get_children())
+    def _tree_selected_index(self, tree):
+        """获取 Treeview 当前选中项的整数索引（iid=str(index)）"""
+        sel = tree.selection()
+        if not sel:
+            return None
+        try:
+            return int(sel[0])
+        except (ValueError, IndexError):
+            return None
 
-    def show_command_context_menu(self, event):
-        tree = event.widget
-        iid = tree.identify_row(event.y)
-        if not iid:
-            return
-        tree.selection_remove(tree.selection())
-        tree.selection_set(iid)
-
-        menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label=t("编辑命令"), command=self.edit_selected_command)
-        menu.add_command(label=t("删除命令"), command=self.delete_selected_command)
-        menu.tk_popup(event.x_root, event.y_root)
-
-    def delete_selected_command(self):
-        page = self._get_current_page_name()
-        tree = self.hist_listboxes.get(page)
-        if not tree:
-            return
-        idx = self._tree_selected_index(tree)
-        if idx is None:
-            return
-        self.command_manager.remove_command(page, idx)
-        # 重建列表以保持 iid 与索引一致
-        self._update_current_command_list(page)
-
-    def edit_selected_command(self):
-        """打开编辑对话框，编辑当前选中的命令"""
-        page = self._get_current_page_name()
-        tree = self.hist_listboxes.get(page)
-        if not tree:
-            return
-        idx = self._tree_selected_index(tree)
-        if idx is None:
-            return
-        self._command_dialog(page, edit_idx=idx)
-
-    # ==================== 命令剪切/粘贴重排 ====================
-
-    def _select_command_index(self, tree, idx: int):
-        """选中并滚动到指定索引的命令行"""
-        children = tree.get_children()
-        if 0 <= idx < len(children):
-            tree.selection_set(children[idx])
-            tree.see(children[idx])
-
-    def _on_command_cut(self, event):
-        """Ctrl+X：剪切选中命令到内部剪切板"""
-        tree = event.widget
-        idx = self._tree_selected_index(tree)
-        if idx is None:
-            return 'break'
-        page = tree._page_name
-        commands = self.command_manager.get_full_commands(page)
-        if idx >= len(commands):
-            return 'break'
-        self._cmd_clipboard = dict(commands[idx])
-        self.command_manager.remove_command(page, idx)
-        self._update_current_command_list(page)
-        # 选中原来被剪切位置的后一条（保持连续操作手感）
-        remaining = len(commands) - 1
-        if remaining > 0:
-            self._select_command_index(tree, min(idx, remaining - 1))
-        return 'break'
-
-    def _on_command_paste(self, event):
-        """Ctrl+V：粘贴剪切板命令到选中行的下一行（未选中则追加到末尾）"""
-        if not self._cmd_clipboard:
-            return 'break'
-        tree = event.widget
-        page = tree._page_name
-        idx = self._tree_selected_index(tree)
-        commands = self.command_manager.get_full_commands(page)
-        if idx is None or idx >= len(commands):
-            insert_at = len(commands)
-        else:
-            insert_at = idx + 1
-        self.command_manager.insert_command(page, insert_at, self._cmd_clipboard)
-        self._update_current_command_list(page)
-        self._select_command_index(tree, insert_at)
-        return 'break'
+    def _toggle_auto_wrap(self):
+        """切换接收框自动换行"""
+        wrap_mode = tk.WORD if self.auto_wrap_var.get() else tk.NONE
+        for text_widget in [self.string_recv_text, self.hex_recv_text, self.compare_recv_text]:
+            text_widget.configure(wrap=wrap_mode)
 
     # ==================== 波形显示 ====================
 
@@ -2397,6 +2574,13 @@ class MainWindow:
         style.configure('Treeview.Heading',
                         font=('Microsoft YaHei', 9, 'bold'), indent=0)
 
+        # 命令行选中高亮样式（随主题换色）
+        self._config_cmd_selection_style()
+
+        # 命令页 Canvas 为经典 Tk 控件，不随 ttk 主题，需手动配色
+        for canvas in self.command_canvases.values():
+            canvas.configure(bg=get_color('bg_input'))
+
         # 接收区文本
         for tw in [self.string_recv_text, self.hex_recv_text, self.compare_recv_text]:
             tw.configure(bg=get_color('bg_input'), fg=get_color('text'),
@@ -2719,12 +2903,15 @@ class MainWindow:
             'waveform_endian': self.waveform_endian,
             'waveform_settings': self.waveform_settings,
             'hist_panel_width': self.hist_panel_width,
+            'cmd_btn_width': self.cmd_btn_width_var.get(),
+            'current_page': self._get_current_page_name(),
             'recv_timeout': self._safe_int(self.recv_timeout_var, 0),
             'frame_enable': self.frame_enable_var.get(),
             'frame_header_content': self.frame_header_content_var.get(),
             'frame_footer_content': self.frame_footer_content_var.get(),
             'frame_hex': self.frame_hex_var.get(),
             'language': get_language(),
+            'auto_wrap': self.auto_wrap_var.get(),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -2770,6 +2957,8 @@ class MainWindow:
         self.frame_header_content_var.set(s.get('frame_header_content', ''))
         self.frame_footer_content_var.set(s.get('frame_footer_content', ''))
         self.frame_hex_var.set(s.get('frame_hex', False))
+        self.auto_wrap_var.set(s.get('auto_wrap', False))
+        self._toggle_auto_wrap()
 
         # 右侧面板宽度（sashpos 是分割线 x 坐标，需换算：位置 = 总宽 - 面板宽）
         hist_width = s.get('hist_panel_width', 220)
@@ -2780,6 +2969,19 @@ class MainWindow:
                 self.hist_width_var.set(hist_width)
             # 启动时窗口未完成布局，_set_right_panel_width 内部会延迟重试
             self._set_right_panel_width(hist_width)
+
+        # 按钮宽度
+        cmd_btn_width = s.get('cmd_btn_width', 4)
+        if hasattr(self, 'cmd_btn_width_var'):
+            self.cmd_btn_width_var.set(cmd_btn_width)
+            self._update_cmd_btn_width(cmd_btn_width)
+
+        # 恢复上次选中的命令页面（按名称，页面不存在则保持第一页）
+        cur_page = s.get('current_page', '')
+        if cur_page and hasattr(self, 'page_selector'):
+            pages = self.command_manager.get_pages()
+            if cur_page in pages:
+                self._switch_to_page(pages.index(cur_page))
 
         # 发送框内容
         self.string_input.delete('1.0', tk.END)
